@@ -46,6 +46,12 @@ This produces `frontend/build`.
 2. Symlink to `sites-enabled`
 3. Reload Nginx
 
+### 7) DNS + HTTPS (recommended)
+
+- Point your domain A record to your droplet IP.
+  Example used in this repo config: viatransport-service.xyz -> 207.154.208.13
+- After DNS propagates, enable HTTPS via Certbot (Let's Encrypt).
+
 ## Notes
 
 - Frontend API base URL is same-origin by default, so the Nginx reverse proxy is the expected production setup.
