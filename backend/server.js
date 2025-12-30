@@ -643,6 +643,22 @@ db.run("ALTER TABLE company_settings ADD COLUMN login_gradient TEXT", (err) => {
 // company_settings/order_documents are ensured in ensureCompanySettings() above.
 
 // Email transporter (configure via env vars; no hardcoded credentials)
+const getEmailMode = () => {
+  // Supported values:
+  // - smtp   (default) -> try to send real emails via SMTP
+  // - manual -> NEVER attempt SMTP; routes will still generate links so they can be copied/sent manually
+  const raw = String(process.env.EMAIL_MODE || process.env.EMAIL_DELIVERY_MODE || 'smtp').trim().toLowerCase();
+  return raw === 'manual' ? 'manual' : 'smtp';
+};
+
+const emailMode = getEmailMode();
+const isManualEmailMode = emailMode === 'manual';
+
+console.log(
+  `📧 Email mode: ${emailMode}` +
+    (isManualEmailMode ? ' (SMTP disabled; links must be shared manually)' : '')
+);
+
 const getSmtpSettings = () => {
   const host = String(process.env.SMTP_HOST || '').trim() || 'smtp.gmail.com';
   const port = Number(process.env.SMTP_PORT || 587);
@@ -658,7 +674,7 @@ const getSmtpSettings = () => {
 const smtp = getSmtpSettings();
 
 let emailTransporter = null;
-if (smtp.user && smtp.pass) {
+if (!isManualEmailMode && smtp.user && smtp.pass) {
   emailTransporter = nodemailer.createTransport({
     host: smtp.host,
     port: smtp.port,
@@ -667,6 +683,10 @@ if (smtp.user && smtp.pass) {
       user: smtp.user,
       pass: smtp.pass,
     },
+    // Keep timeouts short so blocked SMTP ports (e.g. DigitalOcean 587) don't hang requests.
+    connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 7000),
+    greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT_MS || 7000),
+    socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 10000),
   });
 
   // Best-effort verification at startup (doesn't block server start)
@@ -676,15 +696,25 @@ if (smtp.user && smtp.pass) {
       console.warn('⚠️ SMTP transporter could not be verified:', err?.message || String(err));
     });
 } else {
-  console.warn(
-    '⚠️ SMTP is not configured (SMTP_USER/SMTP_PASS missing). Email features (invoices/invitations/password reset) will fail until configured.'
-  );
+  if (isManualEmailMode) {
+    console.warn('📧 EMAIL_MODE=manual -> SMTP init is skipped (temporary workaround).');
+  } else {
+    console.warn(
+      '⚠️ SMTP is not configured (SMTP_USER/SMTP_PASS missing). Email features (invoices/invitations/password reset) will fail until configured.'
+    );
+  }
 }
 
 // Email service
 const emailService = {
+  mode: emailMode,
+  isManual: isManualEmailMode,
   sendInvitation: async (to, invitationUrl) => {
     try {
+      if (isManualEmailMode) {
+        console.warn(`[EMAIL:manual] Invitation email skipped for ${to}. Copy & send this link manually: ${invitationUrl}`);
+        return false;
+      }
       if (!emailTransporter) throw new Error('SMTP is not configured');
       const dbGet = (sql, params) =>
         new Promise((resolve, reject) => {
@@ -811,13 +841,24 @@ const emailService = {
       console.log(`Invitation email sent to ${to}`);
       return true;
     } catch (error) {
-      console.error('Error sending invitation email:', error);
+      console.error('Error sending invitation email:', {
+        message: error?.message || String(error),
+        code: error?.code,
+        command: error?.command,
+        responseCode: error?.responseCode,
+      });
       return false;
     }
   },
 
   sendPasswordReset: async (to, nickname, resetUrl) => {
     try {
+      if (isManualEmailMode) {
+        // For password reset we will expose the URL to the caller (see passwordRecovery route)
+        // so they can copy/paste it manually.
+        console.warn(`[EMAIL:manual] Password reset email skipped for ${to} (${nickname}).`);
+        return false;
+      }
       if (!emailTransporter) throw new Error('SMTP is not configured');
 
       const dbGet = (sql, params) =>
@@ -911,7 +952,12 @@ const emailService = {
       console.log(`Password reset email sent to ${to} (${nickname})`);
       return true;
     } catch (error) {
-      console.error('Error sending password reset email:', error);
+      console.error('Error sending password reset email:', {
+        message: error?.message || String(error),
+        code: error?.code,
+        command: error?.command,
+        responseCode: error?.responseCode,
+      });
       return false;
     }
   },
@@ -932,6 +978,10 @@ const emailService = {
     regNumber,
   }) => {
     try {
+      if (isManualEmailMode) {
+        console.warn(`[EMAIL:manual] Invoice email skipped for ${to}.`);
+        return false;
+      }
       if (!emailTransporter) throw new Error('SMTP is not configured');
       if (!to) throw new Error('Missing recipient email');
       const safeSubject = subject || 'Фактура';
@@ -1066,7 +1116,12 @@ const emailService = {
       console.log(`Invoice email sent to ${to} (${safeSubject})`);
       return true;
     } catch (error) {
-      console.error('Error sending invoice email:', error);
+      console.error('Error sending invoice email:', {
+        message: error?.message || String(error),
+        code: error?.code,
+        command: error?.command,
+        responseCode: error?.responseCode,
+      });
       return false;
     }
   },

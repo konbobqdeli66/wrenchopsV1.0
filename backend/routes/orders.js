@@ -379,7 +379,7 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
 
 // Send invoice by email as PDF attachment.
 // Body: { to: string, recipient?: { name, eik, vat_number, city, address, mol } }
-router.post('/:id/documents/email-invoice', checkPermission('orders', 'write'), async (req, res) => {
+  router.post('/:id/documents/email-invoice', checkPermission('orders', 'write'), async (req, res) => {
     try {
         const orderId = req.params.id;
         const { to, recipient } = req.body || {};
@@ -391,6 +391,16 @@ router.post('/:id/documents/email-invoice', checkPermission('orders', 'write'), 
         const emailService = req.app.get('emailService');
         if (!emailService?.sendInvoiceEmail) {
             return res.status(500).json({ error: 'Email service is not configured.' });
+        }
+
+        // Temporary workaround: when EMAIL_MODE=manual, never attempt SMTP.
+        // The user should download the PDFs and send them manually.
+        if (emailService?.isManual) {
+            return res.json({
+                success: true,
+                email_skipped: true,
+                message: 'Email sending is disabled (EMAIL_MODE=manual). Download the PDFs and send them manually.',
+            });
         }
 
         const dbGet = (sql, params) =>

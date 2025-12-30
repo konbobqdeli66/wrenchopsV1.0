@@ -239,16 +239,8 @@ function Login() {
         </Box>
 
         <Box sx={{ mt: 3, display: 'flex', flexDirection: 'column', gap: 1 }}>
-          <Typography
-            variant="body2"
-            sx={{
-              cursor: "pointer",
-              color: "primary.main",
-              '&:hover': { textDecoration: 'underline' }
-            }}
-            onClick={() => window.location.href = "/forgot-password"}
-          >
-            {t('forgotPassword')}
+          <Typography variant="body2" color="text.secondary">
+            Забравена парола: временно изключено. Свържете се с администратор.
           </Typography>
           <Typography
             variant="body2"

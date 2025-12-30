@@ -63,6 +63,10 @@ export default function Admin({ t }) {
   const [newInvitation, setNewInvitation] = useState(null);
   const [invitationEmail, setInvitationEmail] = useState("");
 
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [newResetLink, setNewResetLink] = useState(null);
+
   const [companySettings, setCompanySettings] = useState({
     app_brand_name: 'Truck Service',
     app_tagline_short: '',
@@ -411,6 +415,32 @@ export default function Admin({ t }) {
     } catch (error) {
       console.error('Error creating invitation:', error);
       alert(t('invitationErrorPrefix') + (error.response?.data?.error || error.message));
+    }
+  }
+
+  async function generatePasswordResetLink() {
+    if (!resetEmail.trim()) {
+      alert(t('invitationEmailRequired'));
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(resetEmail)) {
+      alert(t('pleaseEnterValidEmail'));
+      return;
+    }
+
+    try {
+      const res = await axios.post(`${getApiBaseUrl()}/admin/password-reset-links`, {
+        email: resetEmail,
+      });
+
+      setNewResetLink(res.data);
+      setResetDialogOpen(true);
+      setResetEmail('');
+    } catch (error) {
+      console.error('Error generating password reset link:', error);
+      alert((error.response?.data?.error || error.message) + '');
     }
   }
 
@@ -1279,6 +1309,73 @@ export default function Admin({ t }) {
           </Box>
         </CardContent>
       </Card>
+
+      {/* Password reset link (manual) */}
+      <Card sx={{ mt: 4 }}>
+        <CardContent>
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Ресет на парола (линк за копиране)
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Временно решение при блокиран SMTP: генерирате линк и го изпращате ръчно.
+            </Typography>
+          </Box>
+
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+            <TextField
+              label={t('emailAddress')}
+              type="email"
+              value={resetEmail}
+              onChange={(e) => setResetEmail(e.target.value)}
+              placeholder="user@example.com"
+              sx={{ flex: 1 }}
+              size="small"
+            />
+            <Button variant="contained" startIcon={<LinkIcon />} onClick={generatePasswordResetLink}>
+              Генерирай линк
+            </Button>
+          </Box>
+        </CardContent>
+      </Card>
+
+      {/* Password reset link dialog */}
+      <Dialog
+        open={resetDialogOpen}
+        onClose={() => setResetDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+        fullScreen={fullScreenDialog}
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <LinkIcon />
+          Линк за ресет на парола
+        </DialogTitle>
+        <DialogContent>
+          {newResetLink && (
+            <Box>
+              <Typography variant="body2" color="text.secondary">
+                Валидност до: {new Date(newResetLink.expires_at).toLocaleString(locale)}
+              </Typography>
+              <TextField
+                fullWidth
+                value={newResetLink.reset_url}
+                InputProps={{ readOnly: true }}
+                sx={{ mt: 2 }}
+              />
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => copyToClipboard(newResetLink?.reset_url)}>
+            <ContentCopyIcon sx={{ mr: 1 }} />
+            {t('copyLink')}
+          </Button>
+          <Button onClick={() => setResetDialogOpen(false)} variant="contained">
+            {t('close')}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Invitation Dialog */}
       <Dialog

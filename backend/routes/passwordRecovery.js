@@ -26,6 +26,15 @@ router.post('/request-reset', async (req, res) => {
     return res.status(400).json({ error: 'Invalid email format' });
   }
 
+  // Temporary policy: when EMAIL_MODE=manual, disable self-service password reset.
+  // Admins can generate reset links from the Admin panel.
+  const emailService = req.app.get('emailService');
+  if (emailService?.isManual) {
+    return res.status(403).json({
+      error: 'Password reset via email is temporarily disabled. Please contact an administrator.'
+    });
+  }
+
   try {
     // Find user by email
     db.get('SELECT id, nickname FROM users WHERE email = ? AND is_active = 1', [email], (err, user) => {
@@ -34,7 +43,7 @@ router.post('/request-reset', async (req, res) => {
       }
 
       if (!user) {
-        // Don't reveal if email exists or not for security
+        // Don't reveal if email exists or not for security.
         return res.json({ message: 'If the email exists, a password reset link has been sent' });
       }
 
@@ -59,15 +68,14 @@ router.post('/request-reset', async (req, res) => {
           const baseUrl = publicAppUrl || fallbackBase;
           const resetUrl = `${baseUrl}/reset-password?token=${token}`;
 
-          // Send email
-          const emailService = req.app.get('emailService');
+          // Attempt email delivery.
           const emailSent = await emailService.sendPasswordReset(email, user.nickname, resetUrl);
 
-        if (!emailSent) {
-          console.warn(`Failed to send password reset email to ${email}`);
-        }
+          if (!emailSent) {
+            console.warn(`Failed to send password reset email to ${email}`);
+          }
 
-          res.json({ message: 'If the email exists, a password reset link has been sent' });
+          return res.json({ message: 'If the email exists, a password reset link has been sent' });
         });
       });
     });

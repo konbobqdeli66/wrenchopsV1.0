@@ -12,7 +12,6 @@ import {
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import EmailIcon from "@mui/icons-material/Email";
 import BuildIcon from "@mui/icons-material/Build";
-import { getApiBaseUrl } from "../api";
 import { t as i18nT, getStoredLanguage } from "../i18n";
 
 function ForgotPassword() {
@@ -37,28 +36,11 @@ function ForgotPassword() {
       return;
     }
 
-    try {
-      const response = await fetch(`${getApiBaseUrl()}/password-recovery/request-reset`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setError(data.error || t('resetRequestError'));
-        return;
-      }
-
-      setMessage(t('resetRequestSuccess'));
-      setEmail(""); // Clear the email field
-    } catch (error) {
-      setError(t('serverError'));
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
+    // Temporary: self-service password reset is disabled. Admins can generate reset links
+    // from the Admin panel and send them manually.
+    setError('Функцията „Забравена парола“ е временно изключена. Свържете се с администратор.');
+    setLoading(false);
+    return;
   };
 
   return (
@@ -116,6 +98,7 @@ function ForgotPassword() {
             {message}
           </Alert>
         )}
+
 
         <Box component="form" sx={{ mt: 2 }}>
           <TextField

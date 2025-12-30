@@ -376,7 +376,7 @@ router.post('/invitations', requireAdmin, async (req, res) => {
 
   try {
     // Insert invitation into database
-    await new Promise((resolve, reject) => {
+    const invitationId = await new Promise((resolve, reject) => {
       db.run(`
         INSERT INTO invitations (token, email, created_by, expires_at)
         VALUES (?, ?, ?, ?)
@@ -416,7 +416,7 @@ router.post('/invitations', requireAdmin, async (req, res) => {
     }
 
     res.json({
-      id: this.lastID,
+      id: invitationId,
       token,
       email,
       invitation_url: invitationUrl,
@@ -428,6 +428,78 @@ router.post('/invitations', requireAdmin, async (req, res) => {
       return res.status(400).json({ error: error.message });
     }
     return res.status(500).json({ error: error.message });
+  }
+});
+
+// Generate a password reset link (ADMIN-ONLY, manual sharing)
+// This is used as a workaround when SMTP ports are blocked.
+router.post('/password-reset-links', requireAdmin, async (req, res) => {
+  const db = req.app.get('db');
+  const { email } = req.body || {};
+
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required' });
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ error: 'Invalid email format' });
+  }
+
+  try {
+    const user = await new Promise((resolve, reject) => {
+      db.get(
+        'SELECT id, nickname FROM users WHERE email = ? AND is_active = 1',
+        [email],
+        (err, row) => {
+          if (err) return reject(err);
+          resolve(row || null);
+        }
+      );
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found (or inactive) for this email' });
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 1 * 60 * 60 * 1000).toISOString(); // 1 hour
+
+    const resetTokenId = await new Promise((resolve, reject) => {
+      db.run(
+        `
+          INSERT INTO password_reset_tokens (token, user_id, email, expires_at)
+          VALUES (?, ?, ?, ?)
+        `,
+        [token, user.id, email, expiresAt],
+        function (err) {
+          if (err) return reject(err);
+          resolve(this.lastID);
+        }
+      );
+    });
+
+    const publicAppUrl = await new Promise((resolve) => {
+      db.get('SELECT public_app_url FROM company_settings WHERE id = 1', [], (err, row) => {
+        if (err) return resolve('');
+        return resolve(normalizePublicAppUrl(row?.public_app_url));
+      });
+    });
+
+    const fallbackHost = req.get('host').replace(':5000', ':3000');
+    const fallbackBase = `${req.protocol}://${fallbackHost}`;
+    const baseUrl = publicAppUrl || fallbackBase;
+    const resetUrl = `${baseUrl}/reset-password?token=${token}`;
+
+    return res.json({
+      id: resetTokenId,
+      email,
+      nickname: user.nickname,
+      reset_url: resetUrl,
+      expires_at: expiresAt,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error?.message || String(error) });
   }
 });
 
