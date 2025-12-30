@@ -204,6 +204,8 @@ pm2 logs --lines 100
 
 ## 9) Nginx конфигурация за домейна
 
+Ако искаш **само Nginx стъпките** отделно (копиране на конфиг, symlink, nginx -t, reload, nano shortcuts), виж: `deploy/nginx/install-steps-bg.md`.
+
 ### 9.1 Копирай готовия template към sites-available
 
 ```
