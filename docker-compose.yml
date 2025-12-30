@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: truck-postgres
+    environment:
+      POSTGRES_USER: truck
+      POSTGRES_PASSWORD: pass123
+      POSTGRES_DB: truckdb
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  backend:
+    build: ./backend
+    container_name: truck-backend
+    command: node server.js
+    ports:
+      - "0.0.0.0:5000:5000"
+    environment:
+      DB_USER: truck
+      DB_PASSWORD: pass123
+      DB_HOST: postgres
+      DB_NAME: truckdb
+      NODE_ENV: production
+    depends_on:
+      - postgres
+
+  frontend:
+    build: ./frontend
+    container_name: truck-frontend
+    ports:
+      - "80:80"
+    environment:
+      NODE_ENV: production
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
