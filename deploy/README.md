@@ -28,6 +28,8 @@ Example:
 1. Copy [`backend/.env.example`](backend/.env.example) to `backend/.env`
 2. Set at least `JWT_SECRET` (required in production)
 
+If you want a ready copy/paste template with placeholders for ALL settings, use [`backend/.env.copyme`](backend/.env.copyme).
+
 ### 4) Install dependencies and build frontend
 
 - `npm run install:all`

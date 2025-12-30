@@ -28,6 +28,8 @@ Detailed Bulgarian step-by-step: [`deploy/guide-bg.md`](deploy/guide-bg.md)
 
 Backend env example: [`backend/.env.example`](backend/.env.example)
 
+Ready copy/paste production template (placeholders): [`backend/.env.copyme`](backend/.env.copyme)
+
 ### Important (production)
 
 - Set `JWT_SECRET` to a long random string.

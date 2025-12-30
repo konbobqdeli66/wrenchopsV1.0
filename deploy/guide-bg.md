@@ -142,6 +142,12 @@ npm run build:frontend
 cp backend/.env.example backend/.env
 ```
 
+Ако искаш **готово за copy/paste** (с попълнени ключове за всичко, но с placeholders), можеш да използваш:
+
+```
+cp backend/.env.copyme backend/.env
+```
+
 ### 7.2 Редактирай backend/.env с nano
 
 Команда:
