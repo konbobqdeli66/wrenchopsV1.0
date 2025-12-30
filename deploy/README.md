@@ -8,6 +8,8 @@ This project consists of:
 
 ## Recommended setup: Nginx + PM2
 
+If you want a very detailed Bulgarian step-by-step with Nano shortcuts, see: [`deploy/guide-bg.md`](deploy/guide-bg.md)
+
 ### 1) Install runtime dependencies on the droplet
 
 - Node.js (LTS)

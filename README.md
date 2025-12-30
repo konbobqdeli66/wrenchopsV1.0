@@ -22,6 +22,8 @@ Recommended: Nginx + PM2.
 
 Deployment guide: see [`deploy/README.md`](deploy/README.md)
 
+Detailed Bulgarian step-by-step: [`deploy/guide-bg.md`](deploy/guide-bg.md)
+
 ## Configuration
 
 Backend env example: [`backend/.env.example`](backend/.env.example)
