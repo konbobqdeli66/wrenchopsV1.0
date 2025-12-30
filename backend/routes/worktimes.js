@@ -2,6 +2,7 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const router = express.Router();
 const db = require('../db');
+const { JWT_SECRET } = require('../config');
 
 const XLSX = require('xlsx');
 const multer = require('multer');
@@ -71,7 +72,7 @@ const checkPermission = (module, action) => {
     }
 
     try {
-      const decoded = jwt.verify(token, 'secretkey');
+      const decoded = jwt.verify(token, JWT_SECRET);
       if (decoded.role === 'admin') {
         return next(); // Admin has all permissions
       }

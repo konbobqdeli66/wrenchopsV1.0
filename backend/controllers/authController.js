@@ -1,8 +1,11 @@
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const db = require("../db");
+const { JWT_SECRET } = require('../config');
 
-const SECRET = "super_secret_key"; // по-късно можем да го преместим в .env
+// NOTE: This controller looks like legacy code (it uses db.query which is not part of sqlite3).
+// It is kept for now, but the JWT secret is still centralized in env/config.
+const SECRET = JWT_SECRET;
 
 // REGISTER USER
 exports.register = async (req, res) => {

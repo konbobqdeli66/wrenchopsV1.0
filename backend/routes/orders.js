@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const router = express.Router();
 const db = require('../db');
 const puppeteer = require('puppeteer');
+const { JWT_SECRET } = require('../config');
 
 // Reuse a single Chromium instance to avoid slow startup on every email.
 let sharedPdfBrowser = null;
@@ -42,7 +43,7 @@ const checkPermission = (module, action) => {
     }
 
     try {
-      const decoded = jwt.verify(token, 'secretkey');
+      const decoded = jwt.verify(token, JWT_SECRET);
       if (decoded.role === 'admin') {
         return next(); // Admin has all permissions
       }

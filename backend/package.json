@@ -4,6 +4,7 @@
   "main": "server.js",
   "scripts": {
     "start": "nodemon server.js",
+    "start:prod": "node server.js",
     "clear-data": "node scripts/clear-data.js",
     "seed-worktimes": "node scripts/seed-worktimes.js",
     "clear-worktimes": "node scripts/clear-worktimes.js"

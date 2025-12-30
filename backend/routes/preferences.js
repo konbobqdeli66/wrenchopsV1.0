@@ -1,5 +1,6 @@
 const express = require('express');
 const db = require('../db');
+const { JWT_SECRET } = require('../config');
 
 const router = express.Router();
 
@@ -11,7 +12,7 @@ const authenticateToken = (req, res, next) => {
 
   if (!token) return res.status(401).json({ message: 'Access token required' });
 
-  jwt.verify(token, 'secretkey', (err, user) => {
+  jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) return res.status(403).json({ message: 'Invalid token' });
     req.user = user;
     next();

@@ -2,14 +2,27 @@ import axios from 'axios';
 
 // API configuration utility
 export const getApiBaseUrl = () => {
-  // For external access (domain names), use the same hostname but backend port
-  // This ensures API calls work from external networks
-  if (typeof window !== 'undefined') {
-    const hostname = window.location.hostname;
+  // 1) Explicit override (works for both dev/prod builds)
+  // Example: REACT_APP_API_BASE_URL=https://api.example.com
+  const envBase = String(process.env.REACT_APP_API_BASE_URL || '').trim();
+  if (envBase) return envBase.replace(/\/+$/, '');
 
-    // Always use the same hostname with backend port (5000)
-    return `http://${hostname}:5000`;
+  // 2) Browser runtime: default to same-origin (works with Nginx reverse proxy)
+  // - Production setup: https://app.example.com  -> Nginx serves React + proxies /api to backend
+  // - Dev setup: http://localhost:3000 -> backend is usually on :5000
+  if (typeof window !== 'undefined') {
+    const { hostname, port, protocol } = window.location;
+
+    // CRA dev server default: proxy backend on :5000
+    if (String(port) === '3000') {
+      return `${protocol}//${hostname}:5000`;
+    }
+
+    // Any other case: rely on same-origin (Nginx/Reverse-proxy handles backend routes)
+    return window.location.origin;
   }
+
+  // 3) Server-side fallback
   return 'http://localhost:5000';
 };
 

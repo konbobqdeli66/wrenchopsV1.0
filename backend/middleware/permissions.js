@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const db = require('../db');
+const { JWT_SECRET } = require('../config');
 
 // Middleware to check permissions
 const checkPermission = (module, action) => {
@@ -10,7 +11,7 @@ const checkPermission = (module, action) => {
     }
 
     try {
-      const decoded = jwt.verify(token, 'secretkey');
+      const decoded = jwt.verify(token, JWT_SECRET);
       if (decoded.role === 'admin') {
         return next(); // Admin has all permissions
       }

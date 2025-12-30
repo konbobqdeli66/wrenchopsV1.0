@@ -3,6 +3,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const router = express.Router();
+const { JWT_SECRET } = require('../config');
 
 const normalizePublicAppUrl = (raw) => {
   const s = String(raw || '').trim();
@@ -21,7 +22,7 @@ const requireAdmin = (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, 'secretkey');
+    const decoded = jwt.verify(token, JWT_SECRET);
     if (decoded.role !== 'admin') {
       return res.status(403).json({ error: 'Admin access required' });
     }

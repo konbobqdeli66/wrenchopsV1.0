@@ -434,7 +434,8 @@ const ensureCompanySettings = (callback) => {
 };
 
 const startServer = () => {
-  app.listen(5000, '0.0.0.0', () => console.log("Server running on port 5000"));
+  const port = Number(process.env.PORT || 5000);
+  app.listen(port, '0.0.0.0', () => console.log(`Server running on port ${port}`));
 };
 
 // Initialize database (and only start listening after required tables exist)

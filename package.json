@@ -1,4 +1,12 @@
 {
+  "name": "wrenchops",
+  "private": true,
+  "scripts": {
+    "install:all": "npm --prefix backend install && npm --prefix frontend install",
+    "build:frontend": "npm --prefix frontend run build",
+    "start:backend": "npm --prefix backend run start",
+    "start:backend:prod": "npm --prefix backend run start:prod"
+  },
   "dependencies": {
     "@mui/icons-material": "^7.3.6",
     "@mui/material": "^7.3.6",

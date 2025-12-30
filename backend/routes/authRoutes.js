@@ -3,6 +3,7 @@ const db = require("../db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { getUserPermissions } = require("../middleware/permissions");
+const { JWT_SECRET } = require('../config');
 
 const router = express.Router();
 
@@ -108,7 +109,7 @@ router.post("/login", (req, res) => {
           last_name: user.last_name,
           full_name,
         },
-        "secretkey"
+        JWT_SECRET
       );
       res.json({ token });
     });
@@ -123,7 +124,7 @@ router.get("/permissions", (req, res) => {
   }
 
   try {
-    const decoded = jwt.verify(token, 'secretkey');
+    const decoded = jwt.verify(token, JWT_SECRET);
     if (decoded.role === 'admin') {
       // Admin has access to all modules
       return res.json([
