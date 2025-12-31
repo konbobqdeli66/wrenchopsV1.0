@@ -1212,6 +1212,34 @@ export default function Invoices() {
     }
   };
 
+  const deleteUninvoicedOrder = async () => {
+    if (!isAdmin) {
+      alert('Само администратор може да трие поръчки.');
+      return;
+    }
+    if (!selectedOrder?.id) return;
+
+    const doc = invoicedDocsByOrderId?.[selectedOrder.id];
+    if (doc) {
+      alert('Тази поръчка вече е фактурирана. Първо изтрийте фактурата.');
+      return;
+    }
+
+    if (!window.confirm(`Сигурни ли сте, че искате да изтриете НЕФАКТУРИРАНАТА поръчка за ${selectedOrder.reg_number}?`)) {
+      return;
+    }
+
+    try {
+      await axios.delete(`${getApiBaseUrl()}/orders/${selectedOrder.id}`);
+      setOrders((prev) => (Array.isArray(prev) ? prev.filter((o) => o.id !== selectedOrder.id) : prev));
+      setOrderDialogOpen(false);
+      setSelectedOrder(null);
+      alert('Поръчката е изтрита успешно.');
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Грешка при изтриване на поръчката.');
+    }
+  };
+
   const saveWorktimeQuantity = async () => {
     if (!selectedOrder || !selectedOrderWorktime) return;
     try {
@@ -1869,6 +1897,17 @@ export default function Invoices() {
               onClick={deleteInvoiceDocuments}
             >
               Изтрий фактура
+            </Button>
+          ) : null}
+
+          {isAdmin && selectedOrder && !invoicedDocsByOrderId?.[selectedOrder.id] ? (
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<DeleteIcon />}
+              onClick={deleteUninvoicedOrder}
+            >
+              Изтрий поръчка (нефактурирана)
             </Button>
           ) : null}
           <Button onClick={() => setOrderDialogOpen(false)}>Затвори</Button>
