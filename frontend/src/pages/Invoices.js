@@ -54,6 +54,17 @@ import {
 export default function Invoices() {
   const fullScreenDialog = useMediaQuery('(max-width:600px)');
   const isPhone = fullScreenDialog;
+
+  const isAdmin = useMemo(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return false;
+    try {
+      const payload = decodeJwtPayload(token);
+      return payload?.role === 'admin';
+    } catch {
+      return false;
+    }
+  }, []);
   const [company, setCompany] = useState({
     company_name: '',
     eik: '',
@@ -1170,6 +1181,37 @@ export default function Invoices() {
     w.document.close();
   };
 
+  const deleteInvoiceDocuments = async () => {
+    if (!isAdmin) {
+      alert('Само администратор може да трие фактури.');
+      return;
+    }
+    if (!selectedOrder?.id) return;
+
+    const doc = invoicedDocsByOrderId?.[selectedOrder.id];
+    if (!doc) {
+      alert('Няма фактура за тази поръчка.');
+      return;
+    }
+
+    const invoiceNoLabel = doc?.invoice_no ? `№${doc.invoice_no}` : '';
+    if (!window.confirm(`Сигурни ли сте, че искате да изтриете фактурата ${invoiceNoLabel} за ${selectedOrder.reg_number}?`)) {
+      return;
+    }
+
+    try {
+      await axios.delete(`${getApiBaseUrl()}/orders/${selectedOrder.id}/documents`);
+      setInvoicedDocsByOrderId((prev) => {
+        const next = { ...(prev || {}) };
+        delete next[selectedOrder.id];
+        return next;
+      });
+      alert('Фактурата е изтрита успешно.');
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Грешка при изтриване на фактурата.');
+    }
+  };
+
   const saveWorktimeQuantity = async () => {
     if (!selectedOrder || !selectedOrderWorktime) return;
     try {
@@ -1819,6 +1861,16 @@ export default function Invoices() {
           )}
         </DialogContent>
         <DialogActions>
+          {isAdmin && selectedOrder && invoicedDocsByOrderId?.[selectedOrder.id] ? (
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<DeleteIcon />}
+              onClick={deleteInvoiceDocuments}
+            >
+              Изтрий фактура
+            </Button>
+          ) : null}
           <Button onClick={() => setOrderDialogOpen(false)}>Затвори</Button>
           <Button
             variant="contained"

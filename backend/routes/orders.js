@@ -146,6 +146,22 @@ router.get('/documents', checkPermission('orders', 'read'), (req, res) => {
     });
 });
 
+// Delete invoice/protocol document numbers for an order (ADMIN / users with orders:delete)
+// NOTE: This does NOT rewind company_settings invoice counters (numbers are not reused).
+router.delete('/:id/documents', checkPermission('orders', 'delete'), (req, res) => {
+    const orderId = req.params.id;
+
+    db.run('DELETE FROM order_documents WHERE order_id = ?', [orderId], function (err) {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+        if (this.changes === 0) {
+            return res.status(404).json({ error: 'Няма фактура за тази поръчка.' });
+        }
+        return res.json({ success: true });
+    });
+});
+
 // Търсене на поръчки по рег. номер или име на клиент
 router.get('/search', checkPermission('orders', 'read'), (req, res) => {
     const { q } = req.query;
