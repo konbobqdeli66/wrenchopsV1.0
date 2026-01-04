@@ -51,7 +51,7 @@ import {
   getWorktimeCategoryKey,
 } from '../utils/worktimeClassification';
 
-export default function Invoices() {
+export default function Invoices({ canDeleteInvoices = false }) {
   const fullScreenDialog = useMediaQuery('(max-width:600px)');
   const isPhone = fullScreenDialog;
 
@@ -1264,8 +1264,8 @@ export default function Invoices() {
   };
 
   const deleteInvoiceDocuments = async () => {
-    if (!isAdmin) {
-      alert('Само администратор може да трие фактури.');
+    if (!canDeleteInvoices) {
+      alert('Нямате права да триете фактури.');
       return;
     }
     if (!selectedOrder?.id) return;
@@ -1971,7 +1971,7 @@ export default function Invoices() {
           )}
         </DialogContent>
         <DialogActions>
-          {isAdmin && selectedOrder && invoicedDocsByOrderId?.[selectedOrder.id] ? (
+          {canDeleteInvoices && selectedOrder && invoicedDocsByOrderId?.[selectedOrder.id] ? (
             <Button
               variant="outlined"
               color="error"

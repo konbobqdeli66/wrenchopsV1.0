@@ -562,6 +562,15 @@ function MainApp() {
     [userRole, userPermissions]
   );
 
+  // Separate permission for deleting invoice document numbers (order_documents).
+  const canDeleteInvoices = useMemo(() => {
+    if (userRole === 'admin') return true;
+    const perms = Array.isArray(userPermissions) ? userPermissions : [];
+    const p = perms.find((x) => x.module === 'invoices');
+    if (!p) return false;
+    return Number(p.can_access_module) === 1 && Number(p.can_delete) === 1;
+  }, [userRole, userPermissions]);
+
   const navigationItems = allNavigationItems;
 
   // If access is revoked while the app is open, fall back to Home.
@@ -959,7 +968,7 @@ function MainApp() {
           {page === 2 && <Orders t={t} />}
           {page === 3 && <Worktimes t={t} />}
           {page === 4 && <Vehicles setPage={setPage} t={t} />}
-          {page === 5 && <Invoices t={t} />}
+          {page === 5 && <Invoices t={t} canDeleteInvoices={canDeleteInvoices} />}
           {page === 6 && userRole === 'admin' && <Admin t={t} />}
         </Container>
 

@@ -166,6 +166,8 @@ export default function Admin({ t }) {
     { key: 'home', label: t('home') },
     { key: 'clients', label: t('clients') },
     { key: 'orders', label: t('orders') },
+    // Invoices use their own permission module for invoice-document deletion.
+    { key: 'invoices', label: t('invoices') },
     { key: 'worktimes', label: t('worktimes') },
     { key: 'vehicles', label: t('vehicles') },
     { key: 'admin', label: t('admin') },

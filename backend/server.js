@@ -226,7 +226,7 @@ app.use("/admin", adminRoutes);
 // - Non-admins: only Home is visible/accessible by default (read-only),
 //   all other modules are disabled until an admin grants access.
 const ensureDefaultPermissionsForAllUsers = () => {
-  const modules = ['home', 'clients', 'orders', 'worktimes', 'vehicles', 'admin'];
+  const modules = ['home', 'clients', 'orders', 'worktimes', 'vehicles', 'invoices', 'admin'];
 
   db.all('SELECT id, role FROM users', [], (err, users) => {
     if (err) {
@@ -329,7 +329,7 @@ const ensureBootstrapAdminUser = (callback) => {
           );
 
           // Create full permissions for admin
-          const modules = ['home', 'clients', 'orders', 'worktimes', 'vehicles', 'admin'];
+           const modules = ['home', 'clients', 'orders', 'worktimes', 'vehicles', 'invoices', 'admin'];
           const stmt = db.prepare(
             `INSERT OR IGNORE INTO permissions (user_id, module, can_access_module, can_read, can_write, can_delete)
              VALUES (?, ?, 1, 1, 1, 1)`

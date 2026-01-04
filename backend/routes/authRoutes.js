@@ -61,6 +61,8 @@ router.post("/register", (req, res) => {
               { module: 'home', can_access_module: 1, can_read: 1, can_write: 0, can_delete: 0 },
               { module: 'clients', can_access_module: 0, can_read: 0, can_write: 0, can_delete: 0 },
               { module: 'orders', can_access_module: 0, can_read: 0, can_write: 0, can_delete: 0 },
+              // Invoices use their own permission module for invoice-document deletion.
+              { module: 'invoices', can_access_module: 0, can_read: 0, can_write: 0, can_delete: 0 },
               { module: 'worktimes', can_access_module: 0, can_read: 0, can_write: 0, can_delete: 0 },
               { module: 'vehicles', can_access_module: 0, can_read: 0, can_write: 0, can_delete: 0 },
               { module: 'admin', can_access_module: 0, can_read: 0, can_write: 0, can_delete: 0 },
@@ -138,6 +140,7 @@ router.get("/permissions", (req, res) => {
         { module: 'home', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
         { module: 'clients', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
         { module: 'orders', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
+        { module: 'invoices', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
         { module: 'worktimes', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
         { module: 'vehicles', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
         { module: 'admin', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },

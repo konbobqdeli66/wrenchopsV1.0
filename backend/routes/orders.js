@@ -99,9 +99,12 @@ router.get('/documents', checkPermission('orders', 'read'), (req, res) => {
     });
 });
 
-// Delete invoice/protocol document numbers for an order (ADMIN / users with orders:delete)
+// Delete invoice/protocol document numbers for an order
+// Permission model:
+// - Admin always allowed
+// - Non-admins require invoices:delete (separate from orders:delete)
 // NOTE: This does NOT rewind company_settings invoice counters (numbers are not reused).
-router.delete('/:id/documents', checkPermission('orders', 'delete'), (req, res) => {
+router.delete('/:id/documents', checkPermission('invoices', 'delete'), (req, res) => {
     const orderId = req.params.id;
 
     db.run('DELETE FROM order_documents WHERE order_id = ?', [orderId], function (err) {
