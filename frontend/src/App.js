@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useCallback, useMemo, useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import { CssBaseline, Box, IconButton, useMediaQuery, AppBar, Toolbar, Typography, Chip, Container, FormControl, InputLabel, Select } from "@mui/material";
@@ -339,6 +339,10 @@ const createAppTheme = (mode, primaryColor = '#1976d2', appBarGradient = 'pink')
 });
 };
 
+// Page index -> permission module key mapping.
+// Invoices (page 5) reuse the 'orders' permission module.
+const PAGE_MODULES = ['home', 'clients', 'orders', 'worktimes', 'vehicles', 'orders', 'admin'];
+
 // Главен интерфейс след login
 function MainApp() {
   const [page, setPage] = useState(0);
@@ -380,6 +384,11 @@ function MainApp() {
 
   // Translation function
   const t = (key) => translate(key, language);
+
+  const forceLogout = useCallback(() => {
+    localStorage.removeItem('token');
+    window.location.href = '/login';
+  }, []);
 
   // Save preferences to backend
   const savePreferencesToBackend = async (prefs) => {
@@ -427,7 +436,13 @@ function MainApp() {
         fetch(`${getApiBaseUrl()}/preferences/company`, {
           headers: { Authorization: `Bearer ${token}` }
         })
-          .then((r) => (r.ok ? r.json() : null))
+          .then((r) => {
+            if (r.status === 401) {
+              forceLogout();
+              return null;
+            }
+            return r.ok ? r.json() : null;
+          })
           .then((settings) => {
             if (!settings) return;
             setBrandLogoDataUrl(settings.logo_data_url || '');
@@ -443,6 +458,10 @@ function MainApp() {
           headers: { Authorization: `Bearer ${token}` }
         })
           .then(res => {
+            if (res.status === 401) {
+              forceLogout();
+              throw new Error('Unauthorized');
+            }
             if (!res.ok) throw new Error(`Failed to load permissions: ${res.status}`);
             return res.json();
           })
@@ -460,7 +479,7 @@ function MainApp() {
         setUserPermissions([]);
       }
     }
-  }, []);
+  }, [forceLogout]);
 
   // Sync browser tab title + favicon with branding (same as top bar)
   useEffect(() => {
@@ -502,8 +521,7 @@ function MainApp() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem("token");
-    window.location.href = "/login";
+    forceLogout();
   };
 
   const handleColorDialogOpen = () => {
@@ -530,19 +548,30 @@ function MainApp() {
     ...(userRole === 'admin' ? [{ label: t('admin'), icon: <AdminPanelSettingsIcon />, page: 6, module: 'admin' }] : [])
   ];
 
-  const navigationItems = allNavigationItems.filter((item) => {
-    // Admin can access all modules
-    if (userRole === 'admin') return true;
+  // Always show all tabs, but disable access based on permissions.
+  // New users (by default) will see tabs in a disabled/greyscale state until an admin grants access.
+  const canAccessModule = useCallback(
+    (moduleKey) => {
+      if (userRole === 'admin') return true;
+      const perms = Array.isArray(userPermissions) ? userPermissions : [];
+      const p = perms.find((x) => x.module === moduleKey);
+      // Safe default: allow Home while permissions are still loading.
+      if (!p) return moduleKey === 'home';
+      return Number(p.can_access_module) === 1 && Number(p.can_read) === 1;
+    },
+    [userRole, userPermissions]
+  );
 
-    // If permissions are not loaded yet (or failed to load), fall back to showing
-    // all non-admin navigation items. Backend still enforces access.
-    if (!Array.isArray(userPermissions) || userPermissions.length === 0) return true;
+  const navigationItems = allNavigationItems;
 
-    const permission = userPermissions.find((p) => p.module === item.module);
-    // If the backend hasn't created a row yet, default to visible navigation.
-    if (!permission) return true;
-    return Number(permission.can_access_module ?? 1) === 1;
-  });
+  // If access is revoked while the app is open, fall back to Home.
+  useEffect(() => {
+    if (userRole === 'admin') return;
+    const moduleKey = PAGE_MODULES[page] || 'home';
+    if (!canAccessModule(moduleKey)) {
+      setPage(0);
+    }
+  }, [userRole, userPermissions, page, canAccessModule]);
 
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs}>
@@ -690,8 +719,14 @@ function MainApp() {
                   <ListItem key={item.page} disablePadding>
                     <ListItemButton
                       selected={page === item.page}
-                      onClick={() => setPage(item.page)}
+                      disabled={!canAccessModule(item.module)}
+                      onClick={() => {
+                        if (!canAccessModule(item.module)) return;
+                        setPage(item.page);
+                      }}
                       sx={{
+                        filter: canAccessModule(item.module) ? 'none' : 'grayscale(1)',
+                        opacity: canAccessModule(item.module) ? 1 : 0.65,
                         '&.Mui-selected': {
                           background: `linear-gradient(90deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
                           color: 'common.white',
@@ -760,17 +795,28 @@ function MainApp() {
           {isMobile && (
             <>
               {navigationItems.map((item) => (
+                (() => {
+                  const enabled = canAccessModule(item.module);
+                  return (
                 <MenuItem
                   key={`nav-${item.page}`}
                   selected={page === item.page}
+                  disabled={!enabled}
                   onClick={() => {
+                    if (!enabled) return;
                     setPage(item.page);
                     handleMenuClose();
+                  }}
+                  sx={{
+                    filter: enabled ? 'none' : 'grayscale(1)',
+                    opacity: enabled ? 1 : 0.65,
                   }}
                 >
                   <ListItemIcon>{item.icon}</ListItemIcon>
                   <ListItemText>{item.label}</ListItemText>
                 </MenuItem>
+                  );
+                })()
               ))}
 
               <Divider />
@@ -927,6 +973,8 @@ function MainApp() {
                   showLabels
                   value={page}
                   onChange={(event, newValue) => {
+                    const nextItem = navigationItems.find((x) => x.page === newValue);
+                    if (nextItem && !canAccessModule(nextItem.module)) return;
                     setPage(newValue);
                   }}
                   sx={{
@@ -939,19 +987,25 @@ function MainApp() {
                     '&::-webkit-scrollbar': { display: 'none' },
                   }}
                 >
-                  {navigationItems.map((item, index) => (
+                  {navigationItems.map((item) => {
+                    const enabled = canAccessModule(item.module);
+                    return (
                     <BottomNavigationAction
                       key={item.page}
                       value={item.page}
                       label={item.label}
                       icon={item.icon}
+                      disabled={!enabled}
                       sx={{
                         flex: '0 0 auto',
                         minWidth: 96,
                         maxWidth: 160,
+                        filter: enabled ? 'none' : 'grayscale(1)',
+                        opacity: enabled ? 1 : 0.65,
                       }}
                     />
-                  ))}
+                    );
+                  })}
                 </BottomNavigation>
               </Paper>
             )}

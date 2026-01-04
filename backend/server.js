@@ -215,10 +215,16 @@ app.use("/preferences", preferencesRoutes);
 app.use("/vehicles", vehiclesRoutes);
 app.use("/admin", adminRoutes);
 
-// Ensure every user has consistent default permissions.
-// Requested behavior:
+// Ensure every user has a permissions row per module.
+// IMPORTANT: This must NOT override admin-managed permissions.
+// It should only:
+// - create missing rows (INSERT OR IGNORE)
+// - backfill NULL values (COALESCE)
+//
+// Default policy (can be changed from the Admin UI later):
 // - Admins: full access to everything (including admin)
-// - Non-admins: full access to all functional modules, but NO access to admin module
+// - Non-admins: only Home is visible/accessible by default (read-only),
+//   all other modules are disabled until an admin grants access.
 const ensureDefaultPermissionsForAllUsers = () => {
   const modules = ['home', 'clients', 'orders', 'worktimes', 'vehicles', 'admin'];
 
@@ -232,25 +238,47 @@ const ensureDefaultPermissionsForAllUsers = () => {
       const isAdmin = user.role === 'admin';
 
       modules.forEach((module) => {
-        const allowed = isAdmin ? 1 : (module === 'admin' ? 0 : 1);
-        const can_access_module = allowed;
-        const can_read = allowed;
-        const can_write = allowed;
-        const can_delete = allowed;
+        const defaultPerms = (() => {
+          if (isAdmin) {
+            return { can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 };
+          }
+          if (module === 'home') {
+            return { can_access_module: 1, can_read: 1, can_write: 0, can_delete: 0 };
+          }
+          return { can_access_module: 0, can_read: 0, can_write: 0, can_delete: 0 };
+        })();
 
-        // Create row if missing
+        // 1) Create row if missing (safe default)
         db.run(
           `INSERT OR IGNORE INTO permissions (user_id, module, can_access_module, can_read, can_write, can_delete)
            VALUES (?, ?, ?, ?, ?, ?)`,
-          [user.id, module, can_access_module, can_read, can_write, can_delete]
+          [
+            user.id,
+            module,
+            defaultPerms.can_access_module,
+            defaultPerms.can_read,
+            defaultPerms.can_write,
+            defaultPerms.can_delete,
+          ]
         );
 
-        // Backfill/normalize existing rows (covers NULL values after ALTER TABLE)
+        // 2) Backfill NULL values only (do NOT override existing admin-managed values)
         db.run(
           `UPDATE permissions
-           SET can_access_module = ?, can_read = ?, can_write = ?, can_delete = ?
+           SET
+             can_access_module = COALESCE(can_access_module, ?),
+             can_read = COALESCE(can_read, ?),
+             can_write = COALESCE(can_write, ?),
+             can_delete = COALESCE(can_delete, ?)
            WHERE user_id = ? AND module = ?`,
-          [can_access_module, can_read, can_write, can_delete, user.id, module]
+          [
+            defaultPerms.can_access_module,
+            defaultPerms.can_read,
+            defaultPerms.can_write,
+            defaultPerms.can_delete,
+            user.id,
+            module,
+          ]
         );
       });
     });
@@ -517,6 +545,22 @@ db.run("ALTER TABLE users ADD COLUMN last_name TEXT", (err) => {
   const msg = String(err?.message || '').toLowerCase();
   if (err && !msg.includes('duplicate column') && !msg.includes('no such table')) {
     console.warn('Could not add users.last_name column:', err.message);
+  }
+});
+
+db.run("ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0", (err) => {
+  const msg = String(err?.message || '').toLowerCase();
+  if (err && !msg.includes('duplicate column') && !msg.includes('no such table')) {
+    console.warn('Could not add users.token_version column:', err.message);
+  }
+});
+
+// Backfill token_version for existing rows (ALTER TABLE keeps existing rows as NULL)
+db.run('UPDATE users SET token_version = COALESCE(token_version, 0)', (err) => {
+  // Ignore if the column doesn't exist yet (older DB, race with migrations)
+  const msg = String(err?.message || '').toLowerCase();
+  if (err && !msg.includes('no such column') && !msg.includes('no such table')) {
+    console.warn('Could not backfill users.token_version:', err.message);
   }
 });
 

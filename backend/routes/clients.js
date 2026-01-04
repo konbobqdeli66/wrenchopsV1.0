@@ -383,7 +383,7 @@ router.delete('/:id', checkPermission('clients', 'delete'), (req, res) => {
 });
 
 // Добавяне на автомобил към клиент
-router.patch('/:id/add-vehicle', (req, res) => {
+router.patch('/:id/add-vehicle', checkPermission('clients', 'write'), (req, res) => {
     const { vehicle } = req.body;
     const clientId = req.params.id;
 

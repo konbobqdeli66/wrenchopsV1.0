@@ -5,15 +5,19 @@ const { JWT_SECRET } = require('../config');
 const router = express.Router();
 
 // Middleware to verify JWT token
-const jwt = require('jsonwebtoken');
+const { verifyToken } = require('../middleware/permissions');
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) return res.status(401).json({ message: 'Access token required' });
 
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ message: 'Invalid token' });
+  verifyToken(token, (verifyErr, user) => {
+    if (verifyErr) {
+      const isRevoked = verifyErr.code === 'TOKEN_REVOKED';
+      const isInactive = verifyErr.code === 'USER_INACTIVE';
+      return res.status(401).json({ message: isRevoked ? 'Session expired' : isInactive ? 'Account inactive' : 'Invalid token' });
+    }
     req.user = user;
     next();
   });

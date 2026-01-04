@@ -2,7 +2,7 @@ const express = require("express");
 const db = require("../db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const { getUserPermissions } = require("../middleware/permissions");
+const { getUserPermissions, verifyToken } = require("../middleware/permissions");
 const { JWT_SECRET } = require('../config');
 
 const router = express.Router();
@@ -54,15 +54,16 @@ router.post("/register", (req, res) => {
             );
 
             // Create default permissions for new user.
-            // Requested behavior: same access as admin for all functional modules,
-            // but without access to the Admin module.
+            // Requested behavior:
+            // - New users have NO access by default (admin grants permissions later)
+            // - Keep Home visible/accessible (read-only) so they can log in and see the UI
             const defaultPermissions = [
-              { module: 'home', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
-              { module: 'clients', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
-              { module: 'orders', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
-              { module: 'worktimes', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
-              { module: 'vehicles', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
-              { module: 'admin', can_access_module: 0, can_read: 0, can_write: 0, can_delete: 0 }
+              { module: 'home', can_access_module: 1, can_read: 1, can_write: 0, can_delete: 0 },
+              { module: 'clients', can_access_module: 0, can_read: 0, can_write: 0, can_delete: 0 },
+              { module: 'orders', can_access_module: 0, can_read: 0, can_write: 0, can_delete: 0 },
+              { module: 'worktimes', can_access_module: 0, can_read: 0, can_write: 0, can_delete: 0 },
+              { module: 'vehicles', can_access_module: 0, can_read: 0, can_write: 0, can_delete: 0 },
+              { module: 'admin', can_access_module: 0, can_read: 0, can_write: 0, can_delete: 0 },
             ];
 
             const stmt = db.prepare(`
@@ -108,6 +109,7 @@ router.post("/login", (req, res) => {
           first_name: user.first_name,
           last_name: user.last_name,
           full_name,
+          token_version: Number(user.token_version) || 0,
         },
         JWT_SECRET
       );
@@ -123,17 +125,22 @@ router.get("/permissions", (req, res) => {
     return res.status(401).json({ error: 'No token provided' });
   }
 
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+  verifyToken(token, (verifyErr, decoded) => {
+    if (verifyErr) {
+      const isRevoked = verifyErr.code === 'TOKEN_REVOKED';
+      const isInactive = verifyErr.code === 'USER_INACTIVE';
+      return res.status(401).json({ error: isRevoked ? 'Session expired' : isInactive ? 'Account inactive' : 'Invalid token' });
+    }
+
     if (decoded.role === 'admin') {
       // Admin has access to all modules
       return res.json([
-        { module: 'home', can_access_module: 1 },
-        { module: 'clients', can_access_module: 1 },
-        { module: 'orders', can_access_module: 1 },
-        { module: 'worktimes', can_access_module: 1 },
-        { module: 'vehicles', can_access_module: 1 },
-        { module: 'admin', can_access_module: 1 }
+        { module: 'home', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
+        { module: 'clients', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
+        { module: 'orders', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
+        { module: 'worktimes', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
+        { module: 'vehicles', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
+        { module: 'admin', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
       ]);
     }
 
@@ -143,9 +150,7 @@ router.get("/permissions", (req, res) => {
       }
       res.json(permissions);
     });
-  } catch (error) {
-    res.status(401).json({ error: 'Invalid token' });
-  }
+  });
 });
 
 module.exports = router;

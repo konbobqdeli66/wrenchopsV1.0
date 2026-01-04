@@ -1,9 +1,8 @@
 const express = require('express');
-const jwt = require('jsonwebtoken');
 const router = express.Router();
 const db = require('../db');
 const puppeteer = require('puppeteer');
-const { JWT_SECRET } = require('../config');
+const { checkPermission } = require('../middleware/permissions');
 
 // Reuse a single Chromium instance to avoid slow startup on every email.
 let sharedPdfBrowser = null;
@@ -33,53 +32,6 @@ process.on('exit', () => {
 });
 
 const padLeft = (num, len) => String(num ?? '').padStart(len, '0');
-
-// Middleware to check permissions
-const checkPermission = (module, action) => {
-  return (req, res, next) => {
-    const token = req.headers.authorization?.replace('Bearer ', '');
-    if (!token) {
-      return res.status(401).json({ error: 'No token provided' });
-    }
-
-    try {
-      const decoded = jwt.verify(token, JWT_SECRET);
-      if (decoded.role === 'admin') {
-        return next(); // Admin has all permissions
-      }
-
-      // Check user permissions
-      db.get(
-        'SELECT * FROM permissions WHERE user_id = ? AND module = ?',
-        [decoded.id, module],
-        (err, perm) => {
-          if (err) {
-            return res.status(500).json({ error: 'Database error' });
-          }
-
-          if (!perm) {
-            return res.status(403).json({ error: 'No permissions found' });
-          }
-
-          const permissionMap = {
-            'read': perm.can_read,
-            'write': perm.can_write,
-            'delete': perm.can_delete
-          };
-
-          if (permissionMap[action] !== 1) {
-            return res.status(403).json({ error: `No ${action} permission for ${module}` });
-          }
-
-          req.user = decoded;
-          next();
-        }
-      );
-    } catch (error) {
-      res.status(401).json({ error: 'Invalid token' });
-    }
-  };
-};
 
 // Всички активни поръчки
 router.get('/', checkPermission('orders', 'read'), (req, res) => {
@@ -875,7 +827,7 @@ router.delete('/:id', checkPermission('orders', 'delete'), (req, res) => {
 });
 
 // Добавяне на нормовреме към поръчка
-router.post('/:orderId/worktimes', (req, res) => {
+router.post('/:orderId/worktimes', checkPermission('orders', 'write'), (req, res) => {
     const { orderId } = req.params;
     const { worktime_id, quantity, notes } = req.body;
 
@@ -988,7 +940,7 @@ router.post('/:orderId/worktimes', (req, res) => {
 });
 
 // Вземане на нормовремената за поръчка
-router.get('/:orderId/worktimes', (req, res) => {
+router.get('/:orderId/worktimes', checkPermission('orders', 'read'), (req, res) => {
     const { orderId } = req.params;
 
     db.all(`
@@ -1007,7 +959,7 @@ router.get('/:orderId/worktimes', (req, res) => {
 });
 
 // Обновяване на бележки за нормовреме в поръчка
-router.put('/:orderId/worktimes/:worktimeId', (req, res) => {
+router.put('/:orderId/worktimes/:worktimeId', checkPermission('orders', 'write'), (req, res) => {
     const { orderId, worktimeId } = req.params;
     const { notes, quantity } = req.body;
 
@@ -1042,7 +994,7 @@ router.put('/:orderId/worktimes/:worktimeId', (req, res) => {
 });
 
 // Изтриване на нормовреме от поръчка
-router.delete('/worktimes/:orderWorktimeId', (req, res) => {
+router.delete('/worktimes/:orderWorktimeId', checkPermission('orders', 'delete'), (req, res) => {
     const { orderWorktimeId } = req.params;
 
     db.run('DELETE FROM order_worktimes WHERE id = ?', [orderWorktimeId], function(err) {

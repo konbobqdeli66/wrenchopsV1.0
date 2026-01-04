@@ -244,8 +244,8 @@ export default function Admin({ t }) {
         const existing = existingPermissions.find(p => p.module === module.key);
         return existing || {
           module: module.key,
-          can_access_module: 1,
-          can_read: 1,
+          can_access_module: 0,
+          can_read: 0,
           can_write: 0,
           can_delete: 0
         };
@@ -257,7 +257,8 @@ export default function Admin({ t }) {
       // Create default permissions for all modules
       const defaultPermissions = modules.map(module => ({
         module: module.key,
-        can_read: 1,
+        can_access_module: 0,
+        can_read: 0,
         can_write: 0,
         can_delete: 0
       }));

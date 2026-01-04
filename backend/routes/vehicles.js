@@ -1,10 +1,11 @@
 const express = require('express');
 const db = require('../db');
+const { checkPermission } = require('../middleware/permissions');
 
 const router = express.Router();
 
 // Get all vehicles with client info
-router.get('/', (req, res) => {
+router.get('/', checkPermission('vehicles', 'read'), (req, res) => {
   const query = `
     SELECT v.*, c.name as client_name
     FROM vehicles v
@@ -21,7 +22,7 @@ router.get('/', (req, res) => {
 });
 
 // Search vehicles by various criteria
-router.get('/search', (req, res) => {
+router.get('/search', checkPermission('vehicles', 'read'), (req, res) => {
   const { q, reg_number, vin, brand, model, vehicle_type, client_id } = req.query;
 
   let query = `
@@ -79,7 +80,7 @@ router.get('/search', (req, res) => {
 });
 
 // Get vehicles for a specific client
-router.get('/client/:clientId', (req, res) => {
+router.get('/client/:clientId', checkPermission('vehicles', 'read'), (req, res) => {
   const query = `
     SELECT v.*, c.name as client_name
     FROM vehicles v
@@ -97,7 +98,7 @@ router.get('/client/:clientId', (req, res) => {
 });
 
 // Get single vehicle by ID
-router.get('/:id', (req, res) => {
+router.get('/:id', checkPermission('vehicles', 'read'), (req, res) => {
   const query = `
     SELECT v.*, c.name as client_name
     FROM vehicles v
@@ -117,7 +118,7 @@ router.get('/:id', (req, res) => {
 });
 
 // Add vehicle to client
-router.post('/', (req, res) => {
+router.post('/', checkPermission('vehicles', 'write'), (req, res) => {
   const { client_id, reg_number, vin, brand, model, vehicle_type, gear_box, axes, year } = req.body;
 
   db.run(
@@ -147,7 +148,7 @@ router.post('/', (req, res) => {
 });
 
 // Update vehicle
-router.put('/:id', (req, res) => {
+router.put('/:id', checkPermission('vehicles', 'write'), (req, res) => {
   const { reg_number, vin, brand, model, vehicle_type, gear_box, axes, year } = req.body;
 
   db.run(
@@ -163,7 +164,7 @@ router.put('/:id', (req, res) => {
 });
 
 // Delete vehicle
-router.delete('/:id', (req, res) => {
+router.delete('/:id', checkPermission('vehicles', 'delete'), (req, res) => {
   db.run('DELETE FROM vehicles WHERE id = ?', [req.params.id], function(err) {
     if (err) {
       return res.status(500).json({ error: err.message });
@@ -173,7 +174,7 @@ router.delete('/:id', (req, res) => {
 });
 
 // Get service history for a vehicle
-router.get('/:id/history', (req, res) => {
+router.get('/:id/history', checkPermission('vehicles', 'read'), (req, res) => {
   const query = `
     SELECT o.*, c.name as client_name
     FROM orders o

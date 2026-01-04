@@ -10,7 +10,9 @@ CREATE TABLE IF NOT EXISTS users (
     role TEXT DEFAULT 'user',
     is_active INTEGER DEFAULT 1,
     created_at TEXT DEFAULT (datetime('now')),
-    last_login TEXT
+    last_login TEXT,
+    -- Increment this to invalidate all existing JWTs for a user (force logout)
+    token_version INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS user_preferences (
@@ -29,8 +31,8 @@ CREATE TABLE IF NOT EXISTS permissions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     module TEXT NOT NULL, -- 'clients', 'orders', 'worktimes', 'vehicles', 'admin'
-    can_access_module INTEGER DEFAULT 1, -- Whether user can access this module at all
-    can_read INTEGER DEFAULT 1,
+    can_access_module INTEGER DEFAULT 0, -- Whether user can access this module at all
+    can_read INTEGER DEFAULT 0,
     can_write INTEGER DEFAULT 0,
     can_delete INTEGER DEFAULT 0,
     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,

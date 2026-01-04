@@ -1,9 +1,9 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const router = express.Router();
 const { JWT_SECRET } = require('../config');
+const { verifyToken } = require('../middleware/permissions');
 
 const normalizePublicAppUrl = (raw) => {
   const s = String(raw || '').trim();
@@ -21,16 +21,18 @@ const requireAdmin = (req, res, next) => {
     return res.status(401).json({ error: 'No token provided' });
   }
 
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+  verifyToken(token, (verifyErr, decoded) => {
+    if (verifyErr) {
+      const isRevoked = verifyErr.code === 'TOKEN_REVOKED';
+      const isInactive = verifyErr.code === 'USER_INACTIVE';
+      return res.status(401).json({ error: isRevoked ? 'Session expired' : isInactive ? 'Account inactive' : 'Invalid token' });
+    }
     if (decoded.role !== 'admin') {
       return res.status(403).json({ error: 'Admin access required' });
     }
     req.user = decoded;
     next();
-  } catch (error) {
-    res.status(401).json({ error: 'Invalid token' });
-  }
+  });
 };
 
 // Get all users
@@ -87,6 +89,10 @@ router.put('/users/:id/role', requireAdmin, (req, res) => {
     if (this.changes === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
+
+    // Force logout for the changed account
+    db.run('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?', [userId]);
+
     res.json({ message: 'Role updated successfully' });
   });
 });
@@ -121,6 +127,10 @@ router.put('/users/:id/permissions', requireAdmin, (req, res) => {
     });
 
     stmt.finalize();
+
+    // Force logout for the affected account (permissions changed)
+    db.run('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?', [userId]);
+
     res.json({ message: 'Permissions updated successfully' });
   });
 });
@@ -138,6 +148,10 @@ router.put('/users/:id/status', requireAdmin, (req, res) => {
     if (this.changes === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
+
+    // Force logout for the affected account (status changed)
+    db.run('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?', [userId]);
+
     res.json({ message: 'User status updated successfully' });
   });
 });

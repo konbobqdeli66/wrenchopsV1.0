@@ -52,3 +52,23 @@ axios.interceptors.request.use(
     return Promise.reject(error);
   }
 );
+
+// Axios interceptor: auto-logout on 401 (token revoked/expired)
+axios.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const status = error?.response?.status;
+    if (status === 401 && typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('token');
+      } catch {
+        // ignore
+      }
+      // Avoid redirect loops
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
