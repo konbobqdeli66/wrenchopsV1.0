@@ -824,14 +824,10 @@ export default function Invoices() {
     const multOutOfService = Number(docNumbers?.mult_out_of_service) || 1;
     const multiplier = multOutOfHours * multHoliday * multOutOfService;
 
-    const multiplierInfoParts = [
-      multOutOfHours !== 1 ? `Извън работно време x${multOutOfHours}` : '',
-      multHoliday !== 1 ? `Почивен ден x${multHoliday}` : '',
-      multOutOfService !== 1 ? `Извън сервиз x${multOutOfService}` : '',
-    ].filter(Boolean);
-    const multiplierInfo = multiplierInfoParts.length ? multiplierInfoParts.join(' · ') : 'Коефициенти: x1';
+    // Apply multipliers directly to the hourly rate, but do NOT mention them anywhere in the documents.
+    const effectiveHourlyRate = hourlyRate * multiplier;
 
-    const taxBase = totalHours * hourlyRate * multiplier;
+    const taxBase = totalHours * effectiveHourlyRate;
     const vatAmount = taxBase * (vatRate / 100);
     const totalAmount = taxBase + vatAmount;
 
@@ -982,8 +978,7 @@ export default function Invoices() {
             </div>
             <div style="flex:1;" class="summary">
               <div class="line"><span><strong>Общо часове:</strong></span><span><strong>${totalHours.toFixed(2).replace(/\.00$/, '')} ч.</strong></span></div>
-              <div class="line"><span><strong>Цена на час:</strong></span><span><strong>${fmtBgnEur(hourlyRate)}</strong></span></div>
-              <div class="line"><span><strong>${escapeHtml(multiplierInfo)}</strong></span><span></span></div>
+              <div class="line"><span><strong>Цена на час:</strong></span><span><strong>${fmtBgnEur(effectiveHourlyRate)}</strong></span></div>
               <div class="line"><span><strong>Общо без ДДС:</strong></span><span><strong>${fmtBgnEur(taxBase)}</strong></span></div>
               <div class="line"><span><strong>ДДС:</strong></span><span><strong>${fmtBgnEur(vatAmount)}</strong></span></div>
               <div class="line"><span><strong>За плащане:</strong></span><span><strong>${fmtBgnEur(totalAmount)}</strong></span></div>
@@ -1088,7 +1083,6 @@ export default function Invoices() {
             <div style="flex:1;">
               <div><span class="k">Словом (BGN):</span> <strong>${escapeHtml(numberToBgWords(Math.round(totalAmount)))} лв.</strong></div>
               <div style="margin-top: 6px;"><span class="k">В евро:</span> <strong>${fmt2(toEur(totalAmount))} EUR</strong></div>
-              <div style="margin-top: 6px;" class="muted">${escapeHtml(multiplierInfo)}</div>
               <div style="margin-top: 6px;"><span class="k">Основание на сделка по ЗДДС:</span></div>
               <div class="muted">Работна карта №${workcardNo}</div>
             </div>
