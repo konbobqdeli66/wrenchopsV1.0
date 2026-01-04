@@ -340,8 +340,8 @@ const createAppTheme = (mode, primaryColor = '#1976d2', appBarGradient = 'pink')
 };
 
 // Page index -> permission module key mapping.
-// Invoices (page 5) reuse the 'orders' permission module.
-const PAGE_MODULES = ['home', 'clients', 'orders', 'worktimes', 'vehicles', 'orders', 'admin'];
+// Invoices have their own permission module.
+const PAGE_MODULES = ['home', 'clients', 'orders', 'worktimes', 'vehicles', 'invoices', 'admin'];
 
 // Главен интерфейс след login
 function MainApp() {
@@ -543,8 +543,7 @@ function MainApp() {
     { label: t('orders'), icon: <AssignmentIcon />, page: 2, module: 'orders' },
     { label: t('worktimes'), icon: <AccessTimeIcon />, page: 3, module: 'worktimes' },
     { label: t('vehicles'), icon: <DirectionsCarIcon />, page: 4, module: 'vehicles' },
-    // Invoices are based on completed orders, so we reuse the 'orders' permission module.
-    { label: t('invoices'), icon: <ReceiptLongIcon />, page: 5, module: 'orders' },
+    { label: t('invoices'), icon: <ReceiptLongIcon />, page: 5, module: 'invoices' },
     ...(userRole === 'admin' ? [{ label: t('admin'), icon: <AdminPanelSettingsIcon />, page: 6, module: 'admin' }] : [])
   ];
 
@@ -571,7 +570,11 @@ function MainApp() {
     return Number(p.can_access_module) === 1 && Number(p.can_delete) === 1;
   }, [userRole, userPermissions]);
 
-  const navigationItems = allNavigationItems;
+  // Special rule: when invoices access is disabled, hide the tab entirely.
+  const navigationItems = allNavigationItems.filter((item) => {
+    if (item.module !== 'invoices') return true;
+    return canAccessModule('invoices');
+  });
 
   // If access is revoked while the app is open, fall back to Home.
   useEffect(() => {
