@@ -564,9 +564,14 @@ export default function Invoices() {
     setInvoiceEmailTo('');
     invoiceEmailInputRef.current = '';
     setOrderDialogOpen(true);
-    setMultOutOfHoursChecked(false);
-    setMultHolidayChecked(false);
-    setMultOutOfServiceChecked(false);
+
+    // If the order is already invoiced, keep the previously applied multipliers (locked).
+    // Otherwise default to unchecked.
+    const existingDoc = invoicedDocsByOrderId?.[order?.id];
+    setMultOutOfHoursChecked(Number(existingDoc?.mult_out_of_hours) > 1);
+    setMultHolidayChecked(Number(existingDoc?.mult_holiday) > 1);
+    setMultOutOfServiceChecked(Number(existingDoc?.mult_out_of_service) > 1);
+
     await loadOrderWorktimes(order.id);
     const client = await loadRecipientForOrder(order);
     const prefillEmail = String(client?.email || '').trim();
@@ -811,6 +816,48 @@ export default function Invoices() {
     }
   };
 
+  const invoicedDocForSelectedOrder = useMemo(() => {
+    if (!selectedOrder?.id) return null;
+    return invoicedDocsByOrderId?.[selectedOrder.id] || null;
+  }, [selectedOrder?.id, invoicedDocsByOrderId]);
+
+  const isSelectedOrderAlreadyInvoiced = Boolean(invoicedDocForSelectedOrder);
+
+  const appliedMultiplierPreview = useMemo(() => {
+    // If already invoiced, keep the stored multipliers (don’t allow changing pricing on an existing invoice).
+    if (invoicedDocForSelectedOrder) {
+      return (
+        (Number(invoicedDocForSelectedOrder.mult_out_of_hours) || 1) *
+        (Number(invoicedDocForSelectedOrder.mult_holiday) || 1) *
+        (Number(invoicedDocForSelectedOrder.mult_out_of_service) || 1)
+      );
+    }
+
+    // Otherwise compute from the currently selected checkboxes + company multipliers.
+    const mOutOfHours = Number(company.price_multiplier_out_of_hours) || 1;
+    const mHoliday = Number(company.price_multiplier_holiday) || 1;
+    const mOutOfService = Number(company.price_multiplier_out_of_service) || 1;
+
+    return (
+      (multOutOfHoursChecked ? mOutOfHours : 1) *
+      (multHolidayChecked ? mHoliday : 1) *
+      (multOutOfServiceChecked ? mOutOfService : 1)
+    );
+  }, [
+    invoicedDocForSelectedOrder,
+    company.price_multiplier_out_of_hours,
+    company.price_multiplier_holiday,
+    company.price_multiplier_out_of_service,
+    multOutOfHoursChecked,
+    multHolidayChecked,
+    multOutOfServiceChecked,
+  ]);
+
+  const effectiveHourlyRatePreview = useMemo(() => {
+    const hourlyRate = Number(company.hourly_rate) || 100;
+    return hourlyRate * appliedMultiplierPreview;
+  }, [company.hourly_rate, appliedMultiplierPreview]);
+
   const openInvoicePrint = (docNumbers) => {
     if (!selectedOrder) return;
     const totalHours = orderWorktimes.reduce(
@@ -819,10 +866,11 @@ export default function Invoices() {
     );
     const hourlyRate = Number(company.hourly_rate) || 100;
     const vatRate = Number(company.vat_rate) || 20;
-    const multOutOfHours = Number(docNumbers?.mult_out_of_hours) || 1;
-    const multHoliday = Number(docNumbers?.mult_holiday) || 1;
-    const multOutOfService = Number(docNumbers?.mult_out_of_service) || 1;
-    const multiplier = multOutOfHours * multHoliday * multOutOfService;
+
+    // Apply multipliers to the hourly rate.
+    // NOTE: We intentionally do not print/show any text explaining the multipliers in the documents.
+    // If the order is already invoiced, `appliedMultiplierPreview` is sourced from the stored invoice doc.
+    const multiplier = Number(appliedMultiplierPreview) || 1;
 
     // Apply multipliers directly to the hourly rate, but do NOT mention them anywhere in the documents.
     const effectiveHourlyRate = hourlyRate * multiplier;
@@ -2037,7 +2085,7 @@ export default function Invoices() {
                 Работна карта № <strong>{selectedOrder?.id}</strong>
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                Цена на час: <strong>{Number(company.hourly_rate) || 100} лв/ч</strong>
+                Цена на час: <strong>{effectiveHourlyRatePreview.toFixed(2)} лв/ч</strong>
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 ДДС: <strong>{Number(company.vat_rate) || 20}%</strong>
@@ -2052,6 +2100,7 @@ export default function Invoices() {
                     <Checkbox
                       checked={multOutOfHoursChecked}
                       onChange={(e) => setMultOutOfHoursChecked(e.target.checked)}
+                      disabled={isSelectedOrderAlreadyInvoiced}
                     />
                   }
                   label={`Извън работно време (x${Number(company.price_multiplier_out_of_hours) || 1})`}
@@ -2061,6 +2110,7 @@ export default function Invoices() {
                     <Checkbox
                       checked={multHolidayChecked}
                       onChange={(e) => setMultHolidayChecked(e.target.checked)}
+                      disabled={isSelectedOrderAlreadyInvoiced}
                     />
                   }
                   label={`Почивен ден (x${Number(company.price_multiplier_holiday) || 1})`}
@@ -2070,6 +2120,7 @@ export default function Invoices() {
                     <Checkbox
                       checked={multOutOfServiceChecked}
                       onChange={(e) => setMultOutOfServiceChecked(e.target.checked)}
+                      disabled={isSelectedOrderAlreadyInvoiced}
                     />
                   }
                   label={`Извън сервиз (x${Number(company.price_multiplier_out_of_service) || 1})`}
