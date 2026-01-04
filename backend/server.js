@@ -354,13 +354,21 @@ const ensureCompanySettingsSQL = `
     vat_rate REAL DEFAULT 20,
     eur_rate REAL DEFAULT 1.95583,
     -- Global label shown as "Съставил" in printed/emailed invoices
-    invoice_prepared_by_name TEXT
+    invoice_prepared_by_name TEXT,
+    -- Price multipliers used before invoicing (configured by admin)
+    price_multiplier_out_of_hours REAL DEFAULT 1,
+    price_multiplier_holiday REAL DEFAULT 1,
+    price_multiplier_out_of_service REAL DEFAULT 1
   );
 
   CREATE TABLE IF NOT EXISTS order_documents (
     order_id INTEGER PRIMARY KEY,
     protocol_no TEXT,
     invoice_no TEXT,
+    -- Multipliers applied to the base amount at the moment of invoicing
+    mult_out_of_hours REAL DEFAULT 1,
+    mult_holiday REAL DEFAULT 1,
+    mult_out_of_service REAL DEFAULT 1,
     is_paid INTEGER DEFAULT 0,
     paid_at TEXT,
     created_at TEXT DEFAULT (datetime('now')),
@@ -402,6 +410,11 @@ const ensureCompanySettings = (callback) => {
       // 1b) company_settings.invoice_prepared_by_name
       await runAsync("ALTER TABLE company_settings ADD COLUMN invoice_prepared_by_name TEXT");
 
+      // 1c) price multipliers
+      await runAsync('ALTER TABLE company_settings ADD COLUMN price_multiplier_out_of_hours REAL DEFAULT 1');
+      await runAsync('ALTER TABLE company_settings ADD COLUMN price_multiplier_holiday REAL DEFAULT 1');
+      await runAsync('ALTER TABLE company_settings ADD COLUMN price_multiplier_out_of_service REAL DEFAULT 1');
+
       // Ensure the singleton row exists with sensible defaults.
       await runAsync(
         "INSERT OR IGNORE INTO company_settings (id, hourly_rate, vat_rate, payment_method, eur_rate) VALUES (1, 100, 20, 'Банков път', 1.95583)"
@@ -412,6 +425,11 @@ const ensureCompanySettings = (callback) => {
 
       // Backfill invoice_prepared_by_name to empty string (avoid NULL surprises)
       await runAsync("UPDATE company_settings SET invoice_prepared_by_name = COALESCE(invoice_prepared_by_name, '') WHERE id = 1");
+
+      // Backfill multipliers to 1
+      await runAsync('UPDATE company_settings SET price_multiplier_out_of_hours = COALESCE(price_multiplier_out_of_hours, 1) WHERE id = 1');
+      await runAsync('UPDATE company_settings SET price_multiplier_holiday = COALESCE(price_multiplier_holiday, 1) WHERE id = 1');
+      await runAsync('UPDATE company_settings SET price_multiplier_out_of_service = COALESCE(price_multiplier_out_of_service, 1) WHERE id = 1');
 
       // 2) company_settings contact columns
       await runAsync('ALTER TABLE company_settings ADD COLUMN phone TEXT');
@@ -425,6 +443,14 @@ const ensureCompanySettings = (callback) => {
       await runAsync('ALTER TABLE order_documents ADD COLUMN is_paid INTEGER DEFAULT 0');
       await runAsync('ALTER TABLE order_documents ADD COLUMN paid_at TEXT');
       await runAsync('UPDATE order_documents SET is_paid = COALESCE(is_paid, 0)');
+
+      // 3b) order_documents multipliers
+      await runAsync('ALTER TABLE order_documents ADD COLUMN mult_out_of_hours REAL DEFAULT 1');
+      await runAsync('ALTER TABLE order_documents ADD COLUMN mult_holiday REAL DEFAULT 1');
+      await runAsync('ALTER TABLE order_documents ADD COLUMN mult_out_of_service REAL DEFAULT 1');
+      await runAsync('UPDATE order_documents SET mult_out_of_hours = COALESCE(mult_out_of_hours, 1)');
+      await runAsync('UPDATE order_documents SET mult_holiday = COALESCE(mult_holiday, 1)');
+      await runAsync('UPDATE order_documents SET mult_out_of_service = COALESCE(mult_out_of_service, 1)');
     } catch (err) {
       console.warn('Could not ensure company_settings table:', err?.message || String(err));
     } finally {

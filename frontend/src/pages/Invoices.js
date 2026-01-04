@@ -85,6 +85,9 @@ export default function Invoices() {
     hourly_rate: 100,
     vat_rate: 20,
     eur_rate: 1.95583,
+    price_multiplier_out_of_hours: 1,
+    price_multiplier_holiday: 1,
+    price_multiplier_out_of_service: 1,
   });
 
   const [preparedBy, setPreparedBy] = useState('');
@@ -138,6 +141,11 @@ export default function Invoices() {
 
   const [invoiceConfirmOpen, setInvoiceConfirmOpen] = useState(false);
   const [reservingDocs, setReservingDocs] = useState(false);
+
+  // Multipliers (selected before invoicing)
+  const [multOutOfHoursChecked, setMultOutOfHoursChecked] = useState(false);
+  const [multHolidayChecked, setMultHolidayChecked] = useState(false);
+  const [multOutOfServiceChecked, setMultOutOfServiceChecked] = useState(false);
 
   // Optional: send invoice by email on invoicing
   const [sendInvoiceByEmail, setSendInvoiceByEmail] = useState(false);
@@ -556,6 +564,9 @@ export default function Invoices() {
     setInvoiceEmailTo('');
     invoiceEmailInputRef.current = '';
     setOrderDialogOpen(true);
+    setMultOutOfHoursChecked(false);
+    setMultHolidayChecked(false);
+    setMultOutOfServiceChecked(false);
     await loadOrderWorktimes(order.id);
     const client = await loadRecipientForOrder(order);
     const prefillEmail = String(client?.email || '').trim();
@@ -767,7 +778,13 @@ export default function Invoices() {
 
   const reserveDocumentNumbers = async () => {
     if (!selectedOrder) throw new Error('No order selected');
-    const res = await axios.post(`${getApiBaseUrl()}/orders/${selectedOrder.id}/documents/reserve`);
+    const res = await axios.post(`${getApiBaseUrl()}/orders/${selectedOrder.id}/documents/reserve`, {
+      multipliers: {
+        out_of_hours: multOutOfHoursChecked,
+        holiday: multHolidayChecked,
+        out_of_service: multOutOfServiceChecked,
+      },
+    });
     return res.data;
   };
 
@@ -802,7 +819,12 @@ export default function Invoices() {
     );
     const hourlyRate = Number(company.hourly_rate) || 100;
     const vatRate = Number(company.vat_rate) || 20;
-    const taxBase = totalHours * hourlyRate;
+    const multOutOfHours = Number(docNumbers?.mult_out_of_hours) || 1;
+    const multHoliday = Number(docNumbers?.mult_holiday) || 1;
+    const multOutOfService = Number(docNumbers?.mult_out_of_service) || 1;
+    const multiplier = multOutOfHours * multHoliday * multOutOfService;
+
+    const taxBase = totalHours * hourlyRate * multiplier;
     const vatAmount = taxBase * (vatRate / 100);
     const totalAmount = taxBase + vatAmount;
 
@@ -954,6 +976,7 @@ export default function Invoices() {
             <div style="flex:1;" class="summary">
               <div class="line"><span><strong>Общо часове:</strong></span><span><strong>${totalHours.toFixed(2).replace(/\.00$/, '')} ч.</strong></span></div>
               <div class="line"><span><strong>Цена на час:</strong></span><span><strong>${fmtBgnEur(hourlyRate)}</strong></span></div>
+              <div class="line"><span><strong>${escapeHtml(multiplierInfo)}</strong></span><span></span></div>
               <div class="line"><span><strong>Общо без ДДС:</strong></span><span><strong>${fmtBgnEur(taxBase)}</strong></span></div>
               <div class="line"><span><strong>ДДС:</strong></span><span><strong>${fmtBgnEur(vatAmount)}</strong></span></div>
               <div class="line"><span><strong>За плащане:</strong></span><span><strong>${fmtBgnEur(totalAmount)}</strong></span></div>
@@ -1058,6 +1081,7 @@ export default function Invoices() {
             <div style="flex:1;">
               <div><span class="k">Словом (BGN):</span> <strong>${escapeHtml(numberToBgWords(Math.round(totalAmount)))} лв.</strong></div>
               <div style="margin-top: 6px;"><span class="k">В евро:</span> <strong>${fmt2(toEur(totalAmount))} EUR</strong></div>
+              <div style="margin-top: 6px;" class="muted">${escapeHtml(multiplierInfo)}</div>
               <div style="margin-top: 6px;"><span class="k">Основание на сделка по ЗДДС:</span></div>
               <div class="muted">Работна карта №${workcardNo}</div>
             </div>
@@ -2017,6 +2041,39 @@ export default function Invoices() {
               <Typography variant="body2" color="text.secondary">
                 ДДС: <strong>{Number(company.vat_rate) || 20}%</strong>
               </Typography>
+
+              <Box sx={{ mt: 1.5 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 0.5 }}>
+                  Коефициенти (множители)
+                </Typography>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={multOutOfHoursChecked}
+                      onChange={(e) => setMultOutOfHoursChecked(e.target.checked)}
+                    />
+                  }
+                  label={`Извън работно време (x${Number(company.price_multiplier_out_of_hours) || 1})`}
+                />
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={multHolidayChecked}
+                      onChange={(e) => setMultHolidayChecked(e.target.checked)}
+                    />
+                  }
+                  label={`Почивен ден (x${Number(company.price_multiplier_holiday) || 1})`}
+                />
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={multOutOfServiceChecked}
+                      onChange={(e) => setMultOutOfServiceChecked(e.target.checked)}
+                    />
+                  }
+                  label={`Извън сервиз (x${Number(company.price_multiplier_out_of_service) || 1})`}
+                />
+              </Box>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
                 „Съставил“ ще се попълни автоматично от настройките на акаунта ({preparedBy || '—'}).
               </Typography>
@@ -2356,3 +2413,9 @@ export default function Invoices() {
   );
 }
 
+    const multiplierInfoParts = [
+      multOutOfHours !== 1 ? `Извън работно време x${multOutOfHours}` : '',
+      multHoliday !== 1 ? `Почивен ден x${multHoliday}` : '',
+      multOutOfService !== 1 ? `Извън сервиз x${multOutOfService}` : '',
+    ].filter(Boolean);
+    const multiplierInfo = multiplierInfoParts.length ? multiplierInfoParts.join(' · ') : 'Коефициенти: x1';

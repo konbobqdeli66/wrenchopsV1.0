@@ -276,6 +276,7 @@ router.put('/:id/complete', checkPermission('orders', 'write'), (req, res) => {
 // Uses company_settings.invoice_last_number / protocol_last_number counters.
 router.post('/:id/documents/reserve', checkPermission('orders', 'write'), (req, res) => {
     const orderId = req.params.id;
+    const multFlags = req.body?.multipliers || {};
 
     db.get('SELECT * FROM order_documents WHERE order_id = ?', [orderId], (err, existing) => {
         if (err) {
@@ -298,7 +299,10 @@ router.post('/:id/documents/reserve', checkPermission('orders', 'write'), (req, 
                     invoice_pad_length,
                     invoice_last_number,
                     protocol_pad_length,
-                    protocol_last_number
+                    protocol_last_number,
+                    price_multiplier_out_of_hours,
+                    price_multiplier_holiday,
+                    price_multiplier_out_of_service
                   FROM company_settings
                   WHERE id = 1
                 `,
@@ -316,6 +320,14 @@ router.post('/:id/documents/reserve', checkPermission('orders', 'write'), (req, 
                     const protocolPadLength = Math.max(1, parseInt(settings?.protocol_pad_length, 10) || 10);
                     const lastProtocol = parseInt(settings?.protocol_last_number, 10) || 0;
 
+                    const mOutOfHours = Number(settings?.price_multiplier_out_of_hours) || 1;
+                    const mHoliday = Number(settings?.price_multiplier_holiday) || 1;
+                    const mOutOfService = Number(settings?.price_multiplier_out_of_service) || 1;
+
+                    const mult_out_of_hours = multFlags?.out_of_hours ? mOutOfHours : 1;
+                    const mult_holiday = multFlags?.holiday ? mHoliday : 1;
+                    const mult_out_of_service = multFlags?.out_of_service ? mOutOfService : 1;
+
                     const nextInvoice = lastInvoice + 1;
                     const nextProtocol = lastProtocol + 1;
 
@@ -332,8 +344,25 @@ router.post('/:id/documents/reserve', checkPermission('orders', 'write'), (req, 
                             }
 
                             db.run(
-                                'INSERT INTO order_documents (order_id, protocol_no, invoice_no) VALUES (?, ?, ?)',
-                                [orderId, protocolNo, invoiceNo],
+                                `
+                                  INSERT INTO order_documents (
+                                    order_id,
+                                    protocol_no,
+                                    invoice_no,
+                                    mult_out_of_hours,
+                                    mult_holiday,
+                                    mult_out_of_service
+                                  )
+                                  VALUES (?, ?, ?, ?, ?, ?)
+                                `,
+                                [
+                                  orderId,
+                                  protocolNo,
+                                  invoiceNo,
+                                  mult_out_of_hours,
+                                  mult_holiday,
+                                  mult_out_of_service,
+                                ],
                                 function(err) {
                                     if (err) {
                                         db.run('ROLLBACK');
@@ -463,7 +492,10 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
             [order?.reg_number || '']
         );
         const assetLabel = vehicleRow?.vehicle_type === 'trailer' ? 'ремарке' : 'влекач';
-        const docs = await dbGet('SELECT protocol_no, invoice_no FROM order_documents WHERE order_id = ?', [orderId]);
+        const docs = await dbGet(
+            'SELECT protocol_no, invoice_no, mult_out_of_hours, mult_holiday, mult_out_of_service FROM order_documents WHERE order_id = ?',
+            [orderId]
+        );
         const company =
             (await dbGet(
                 `
@@ -520,7 +552,12 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
         const toEur = (bgn) => (Number(bgn) || 0) / eurRate;
         const fmt2 = (n) => (Number(n) || 0).toFixed(2);
         const fmtBgnEur = (bgn) => `${fmt2(bgn)} BGN / ${fmt2(toEur(bgn))} EUR`;
-        const taxBase = totalHours * hourlyRate;
+        const multiplier =
+            (Number(docs?.mult_out_of_hours) || 1) *
+            (Number(docs?.mult_holiday) || 1) *
+            (Number(docs?.mult_out_of_service) || 1);
+
+        const taxBase = totalHours * hourlyRate * multiplier;
         const vatAmount = taxBase * (vatRate / 100);
         const totalAmount = taxBase + vatAmount;
 

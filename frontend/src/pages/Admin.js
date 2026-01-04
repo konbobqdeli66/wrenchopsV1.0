@@ -100,6 +100,9 @@ export default function Admin({ t }) {
     vat_rate: 20,
     eur_rate: 1.95583,
     invoice_prepared_by_name: '',
+    price_multiplier_out_of_hours: 1,
+    price_multiplier_holiday: 1,
+    price_multiplier_out_of_service: 1,
   });
   const [savingCompanySettings, setSavingCompanySettings] = useState(false);
 
@@ -815,6 +818,57 @@ export default function Admin({ t }) {
                 type="number"
                 value={companySettings.hourly_rate}
                 onChange={(e) => setCompanySettings({ ...companySettings, hourly_rate: Number(e.target.value) })}
+              />
+            </Grid>
+
+            <Grid item xs={12}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 800, mt: 1 }}>
+                Коефициенти за фактуриране (множители)
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                Използват се преди фактуриране чрез отметки. По подразбиране са x1.
+              </Typography>
+            </Grid>
+
+            <Grid item xs={12} md={4}>
+              <TextField
+                fullWidth
+                label="Извън работно време (x)"
+                type="number"
+                value={companySettings.price_multiplier_out_of_hours}
+                onChange={(e) =>
+                  setCompanySettings({ ...companySettings, price_multiplier_out_of_hours: Number(e.target.value) })
+                }
+                inputProps={{ step: '0.01', min: 0 }}
+                helperText="Пример: 1.2"
+              />
+            </Grid>
+
+            <Grid item xs={12} md={4}>
+              <TextField
+                fullWidth
+                label="Почивен ден (x)"
+                type="number"
+                value={companySettings.price_multiplier_holiday}
+                onChange={(e) =>
+                  setCompanySettings({ ...companySettings, price_multiplier_holiday: Number(e.target.value) })
+                }
+                inputProps={{ step: '0.01', min: 0 }}
+                helperText="Пример: 1.5"
+              />
+            </Grid>
+
+            <Grid item xs={12} md={4}>
+              <TextField
+                fullWidth
+                label="Извън сервиз (x)"
+                type="number"
+                value={companySettings.price_multiplier_out_of_service}
+                onChange={(e) =>
+                  setCompanySettings({ ...companySettings, price_multiplier_out_of_service: Number(e.target.value) })
+                }
+                inputProps={{ step: '0.01', min: 0 }}
+                helperText="Пример: 1.3"
               />
             </Grid>
             <Grid item xs={12} md={3}>

@@ -264,7 +264,10 @@ router.put('/settings', requireAdmin, (req, res) => {
     hourly_rate,
     vat_rate,
     eur_rate,
-    invoice_prepared_by_name
+    invoice_prepared_by_name,
+    price_multiplier_out_of_hours,
+    price_multiplier_holiday,
+    price_multiplier_out_of_service
   } = req.body;
 
   // Ensure row exists
@@ -304,7 +307,10 @@ router.put('/settings', requireAdmin, (req, res) => {
         hourly_rate = COALESCE(?, hourly_rate),
         vat_rate = COALESCE(?, vat_rate),
       eur_rate = COALESCE(?, eur_rate),
-        invoice_prepared_by_name = COALESCE(?, invoice_prepared_by_name)
+        invoice_prepared_by_name = COALESCE(?, invoice_prepared_by_name),
+        price_multiplier_out_of_hours = COALESCE(?, price_multiplier_out_of_hours),
+        price_multiplier_holiday = COALESCE(?, price_multiplier_holiday),
+        price_multiplier_out_of_service = COALESCE(?, price_multiplier_out_of_service)
       WHERE id = 1
     `,
     [
@@ -339,7 +345,10 @@ router.put('/settings', requireAdmin, (req, res) => {
       hourly_rate ?? null,
       vat_rate ?? null,
       eur_rate ?? null,
-      invoice_prepared_by_name ?? null
+      invoice_prepared_by_name ?? null,
+      price_multiplier_out_of_hours ?? null,
+      price_multiplier_holiday ?? null,
+      price_multiplier_out_of_service ?? null
     ],
     function(err) {
       if (err) {
