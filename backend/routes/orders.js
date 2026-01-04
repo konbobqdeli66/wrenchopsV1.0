@@ -109,18 +109,19 @@ router.get('/', checkPermission('orders', 'read'), (req, res) => {
 // Всички приключени поръчки (за фактуриране)
 router.get('/completed', checkPermission('orders', 'read'), (req, res) => {
     // Also return computed totals so the UI can show the value per order without extra calls.
-    // Uses the CURRENT company_settings hourly_rate/vat_rate.
+    // Uses the CURRENT company_settings hourly_rate/vat_rate and applies multipliers if invoiced.
     db.all(
         `
           SELECT
-            o.*, 
+            o.*,
             COALESCE(SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0)), 0) AS total_hours,
-            (COALESCE(SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0)), 0) * COALESCE((SELECT hourly_rate FROM company_settings WHERE id = 1), 100)) AS tax_base_bgn,
-            ((COALESCE(SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0)), 0) * COALESCE((SELECT hourly_rate FROM company_settings WHERE id = 1), 100)) * (COALESCE((SELECT vat_rate FROM company_settings WHERE id = 1), 20) / 100.0)) AS vat_amount_bgn,
-            ((COALESCE(SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0)), 0) * COALESCE((SELECT hourly_rate FROM company_settings WHERE id = 1), 100)) * (1.0 + (COALESCE((SELECT vat_rate FROM company_settings WHERE id = 1), 20) / 100.0))) AS total_amount_bgn
+            (COALESCE(SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0)), 0) * COALESCE((SELECT hourly_rate FROM company_settings WHERE id = 1), 100) * COALESCE(od.mult_out_of_hours, 1) * COALESCE(od.mult_holiday, 1) * COALESCE(od.mult_out_of_service, 1)) AS tax_base_bgn,
+            ((COALESCE(SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0)), 0) * COALESCE((SELECT hourly_rate FROM company_settings WHERE id = 1), 100) * COALESCE(od.mult_out_of_hours, 1) * COALESCE(od.mult_holiday, 1) * COALESCE(od.mult_out_of_service, 1)) * (COALESCE((SELECT vat_rate FROM company_settings WHERE id = 1), 20) / 100.0)) AS vat_amount_bgn,
+            ((COALESCE(SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0)), 0) * COALESCE((SELECT hourly_rate FROM company_settings WHERE id = 1), 100) * COALESCE(od.mult_out_of_hours, 1) * COALESCE(od.mult_holiday, 1) * COALESCE(od.mult_out_of_service, 1)) * (1.0 + (COALESCE((SELECT vat_rate FROM company_settings WHERE id = 1), 20) / 100.0))) AS total_amount_bgn
           FROM orders o
           LEFT JOIN order_worktimes ow ON ow.order_id = o.id
           LEFT JOIN worktimes w ON w.id = ow.worktime_id
+          LEFT JOIN order_documents od ON od.order_id = o.id
           WHERE o.status = 'completed'
           GROUP BY o.id
           ORDER BY o.completed_at DESC, o.created_at DESC
