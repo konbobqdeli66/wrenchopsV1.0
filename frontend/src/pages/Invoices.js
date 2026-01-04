@@ -824,6 +824,13 @@ export default function Invoices() {
     const multOutOfService = Number(docNumbers?.mult_out_of_service) || 1;
     const multiplier = multOutOfHours * multHoliday * multOutOfService;
 
+    const multiplierInfoParts = [
+      multOutOfHours !== 1 ? `Извън работно време x${multOutOfHours}` : '',
+      multHoliday !== 1 ? `Почивен ден x${multHoliday}` : '',
+      multOutOfService !== 1 ? `Извън сервиз x${multOutOfService}` : '',
+    ].filter(Boolean);
+    const multiplierInfo = multiplierInfoParts.length ? multiplierInfoParts.join(' · ') : 'Коефициенти: x1';
+
     const taxBase = totalHours * hourlyRate * multiplier;
     const vatAmount = taxBase * (vatRate / 100);
     const totalAmount = taxBase + vatAmount;
@@ -2412,10 +2419,3 @@ export default function Invoices() {
     </Container>
   );
 }
-
-    const multiplierInfoParts = [
-      multOutOfHours !== 1 ? `Извън работно време x${multOutOfHours}` : '',
-      multHoliday !== 1 ? `Почивен ден x${multHoliday}` : '',
-      multOutOfService !== 1 ? `Извън сервиз x${multOutOfService}` : '',
-    ].filter(Boolean);
-    const multiplierInfo = multiplierInfoParts.length ? multiplierInfoParts.join(' · ') : 'Коефициенти: x1';
