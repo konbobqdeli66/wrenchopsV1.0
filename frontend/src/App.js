@@ -756,6 +756,27 @@ function MainApp() {
             horizontal: 'right',
           }}
         >
+          {/* MOBILE: allow switching tabs (pages) from the settings dropdown */}
+          {isMobile && (
+            <>
+              {navigationItems.map((item) => (
+                <MenuItem
+                  key={`nav-${item.page}`}
+                  selected={page === item.page}
+                  onClick={() => {
+                    setPage(item.page);
+                    handleMenuClose();
+                  }}
+                >
+                  <ListItemIcon>{item.icon}</ListItemIcon>
+                  <ListItemText>{item.label}</ListItemText>
+                </MenuItem>
+              ))}
+
+              <Divider />
+            </>
+          )}
+
           <MenuItem>
             <ListItemIcon>
               {darkMode ? <Brightness7Icon /> : <Brightness4Icon />}
