@@ -1103,8 +1103,6 @@ export default function Invoices() {
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
       }
-      .toolbar { position: sticky; top: 0; background: #fff; border-bottom: 1px solid #ddd; padding: 10px 0; margin-bottom: 10px; }
-      .toolbar button { padding: 8px 12px; font-size: 14px; }
       .page { page-break-after: always; position: relative; min-height: 269mm; }
       .page:last-child { page-break-after: auto; }
       .watermark { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 0; }
@@ -1135,17 +1133,23 @@ export default function Invoices() {
       .badge { display: inline-block; border: 2px solid #111; padding: 2px 10px; font-weight: 900; letter-spacing: 1px; }
       .page-footer { position: absolute; left: 0; right: 0; bottom: 0; border-top: 1px solid #ddd; padding-top: 2mm; font-size: 11px; display: flex; justify-content: space-between; color: #333; }
       @media print {
-        .toolbar { display: none; }
         body { margin: 0; }
       }
     </style>
   </head>
   <body>
-    <div class="toolbar">
-      <button onclick="window.print()">Принтирай (4 страници)</button>
-    </div>
-
     ${pagesHtml}
+
+    <script>
+      // Auto-open print dialog (no separate "print page" UX)
+      window.onload = function () {
+        try { window.focus(); } catch (e) {}
+        try { window.print(); } catch (e) {}
+        window.onafterprint = function () {
+          try { window.close(); } catch (e) {}
+        };
+      };
+    </script>
 
   </body>
 </html>`;
@@ -1170,9 +1174,14 @@ export default function Invoices() {
       doc.write(html);
       doc.close();
       iframe.onload = () => {
-        iframe.contentWindow?.focus();
-        iframe.contentWindow?.print();
-        setTimeout(() => iframe.remove(), 1000);
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print?.();
+          iframe.contentWindow.onafterprint = () => setTimeout(() => iframe.remove(), 250);
+          setTimeout(() => iframe.remove(), 5000);
+        } catch {
+          setTimeout(() => iframe.remove(), 1000);
+        }
       };
       return;
     }
