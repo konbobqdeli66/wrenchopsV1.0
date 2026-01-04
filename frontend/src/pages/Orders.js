@@ -95,6 +95,33 @@ export default function Orders({ t }) {
   const isMobile = useMediaQuery('(max-width:600px)');
   const fullScreenDialog = isDesktop || isMobile;
 
+  // Higher-contrast, no-gradients UI tokens (used in the Work Order / Order Details dialog)
+  const hcDialogTitleSx = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 1,
+    backgroundColor: (theme) => theme.palette.background.paper,
+    color: 'text.primary',
+    borderBottom: (theme) => `1px solid ${theme.palette.divider}`,
+    fontWeight: 900,
+    fontSize: '1.1rem',
+    mb: 0,
+    py: 1.25,
+  };
+  const hcSectionPaperSx = {
+    p: { xs: 1.25, sm: 2 },
+    borderRadius: 2,
+    border: (theme) => `2px solid ${theme.palette.divider}`,
+    backgroundColor: (theme) => theme.palette.background.paper,
+  };
+  const hcKpiBoxSx = {
+    p: 1,
+    borderRadius: 2,
+    border: (theme) => `2px solid ${theme.palette.divider}`,
+    textAlign: 'center',
+    backgroundColor: (theme) => theme.palette.background.default,
+  };
+
   // Keep everything perfectly aligned to the same left/right edges.
   // (No fixed maxWidth – use the available content width.)
   const pageColumnSx = { width: '100%' };
@@ -698,24 +725,11 @@ export default function Orders({ t }) {
         }}
       >
         <DialogTitle
-          sx={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 1,
-            background: (theme) =>
-              theme.palette.mode === 'dark'
-                ? 'linear-gradient(135deg, #181b1eff 0%, #33577aff 100%)'
-                : 'linear-gradient(135deg, #151017ff 0%, #4c494fff 100%)',
-            color: 'white',
-            borderBottom: (theme) => `2px solid ${theme.palette.mode === 'dark' ? '#555' : '#ccc'}`,
-            fontWeight: 'bold',
-            fontSize: '1.25rem',
-            mb: 0,
-          }}
+          sx={hcDialogTitleSx}
         >
           <IconButton
             onClick={handleCloseOrderDetails}
-            sx={{ color: 'white', bgcolor: 'rgba(0,0,0,0.18)', mr: 0.5, '&:hover': { bgcolor: 'rgba(0,0,0,0.28)' } }}
+            sx={{ mr: 0.5 }}
             aria-label="Back"
           >
             <ArrowBackIcon />
@@ -723,165 +737,146 @@ export default function Orders({ t }) {
           <AssignmentIcon sx={{ fontSize: '1.5rem' }} />
           Детайли на поръчка - {selectedOrder?.reg_number}
         </DialogTitle>
-        <DialogContent sx={{ p: 3 }}>
+        <DialogContent sx={{ p: { xs: 1.25, sm: 2 } }}>
           {selectedOrder && (
             <Box sx={{ mb: 4 }}>
-              <Grid container spacing={3}>
-                <Grid item xs={12} md={8}>
-                  <Card sx={{
-                    p: 3,
-                    border: (theme) => `2px solid ${theme.palette.mode === 'dark' ? '#555' : '#ccc'}`,
-                    borderRadius: 2,
-                    backgroundColor: (theme) => theme.palette.mode === 'dark' ? '#1976d2' : '#e3f2fd',
-                    color: (theme) => theme.palette.mode === 'dark' ? 'white' : 'black',
-                    boxShadow: (theme) => theme.palette.mode === 'dark'
-                      ? '0 10px 12px rgba(0,0,0,0.4)'
-                      : '0 10px 12px rgba(0,0,0,0.15)'
-                  }}>
-                    <Typography variant="h6" gutterBottom sx={{
-                      fontWeight: 'bold',
-                      fontSize: '1.1rem',
-                      mb: 2
-                    }}>
-                      📋 Информация за поръчката
-                    </Typography>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Typography variant="body1" sx={{ fontWeight: 'bold', minWidth: 140 }}>
-                          🚗 Рег. номер:
-                        </Typography>
-                        <Chip
-                          label={selectedOrder.reg_number}
-                          color="primary"
-                          variant="outlined"
-                          sx={{ fontWeight: 'bold' }}
-                        />
-                      </Box>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Typography variant="body1" sx={{ fontWeight: 'bold', minWidth: 140 }}>
-                          👤 Клиент:
-                        </Typography>
-                        <Typography variant="body1">{selectedOrder.client_name}</Typography>
-                      </Box>
-                      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
-                        <Typography variant="body1" sx={{ fontWeight: 'bold', minWidth: 140, mt: 0.5 }}>
-                          🔧 Оплакване:
-                        </Typography>
-                        <Typography variant="body1" sx={{
-                          backgroundColor: (theme) => theme.palette.mode === 'dark' ? '#0f172a' : '#ffffff',
-                          color: (theme) => theme.palette.mode === 'dark' ? '#ffffff' : '#000000',
-                          p: 1.5,
-                          borderRadius: 1,
-                          border: (theme) => `1px solid ${theme.palette.mode === 'dark' ? '#334155' : '#000000'}`,
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: { xs: '1fr', lg: '1.25fr 0.75fr' },
+                  gap: { xs: 1.25, sm: 2 },
+                  alignItems: 'stretch',
+                }}
+              >
+                <Paper variant="outlined" sx={hcSectionPaperSx}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 900, mb: 1 }}>
+                    Информация за поръчката
+                  </Typography>
+                  <Stack spacing={1}>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 800, minWidth: { sm: 140 } }}>
+                        Рег. номер
+                      </Typography>
+                      <Chip label={selectedOrder.reg_number} color="primary" variant="outlined" sx={{ fontWeight: 900, width: 'fit-content' }} />
+                    </Stack>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 800, minWidth: { sm: 140 } }}>
+                        Клиент
+                      </Typography>
+                      <Typography variant="body1" sx={{ fontWeight: 800 }}>
+                        {selectedOrder.client_name || '—'}
+                      </Typography>
+                    </Stack>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'flex-start' }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 800, minWidth: { sm: 140 }, mt: { sm: 0.5 } }}>
+                        Оплакване
+                      </Typography>
+                      <Paper
+                        variant="outlined"
+                        sx={{
+                          p: 1.25,
+                          borderRadius: 2,
+                          border: (theme) => `2px solid ${theme.palette.divider}`,
+                          backgroundColor: (theme) => theme.palette.background.default,
                           flex: 1,
-                          fontStyle: 'italic'
-                        }}>
-                          {selectedOrder.complaint}
+                        }}
+                      >
+                        <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                          {selectedOrder.complaint || '—'}
                         </Typography>
-                      </Box>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Typography variant="body1" sx={{ fontWeight: 'bold', minWidth: 140 }}>
-                          📅 Създадена:
-                        </Typography>
-                        <Typography variant="body1">
-                          {new Date(selectedOrder.created_at).toLocaleDateString('bg-BG')}
-                        </Typography>
-                      </Box>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Typography variant="body1" sx={{ fontWeight: 'bold', minWidth: 140 }}>
-                          📊 Статус:
-                        </Typography>
-                        <Chip
-                          label={selectedOrder.status === 'active' ? 'Активна' : 'Завършена'}
-                          color={selectedOrder.status === 'active' ? 'success' : 'default'}
-                          size="small"
-                          sx={{ fontWeight: 'bold' }}
-                        />
-                      </Box>
-                    </Box>
-                  </Card>
-                </Grid>
-                <Grid item xs={12} md={4}>
-                  <Card sx={{
-                    p: 3,
-                    border: (theme) => `3px solid ${theme.palette.mode === 'dark' ? '#ff6b6b' : '#ff9a9e'}`,
-                    borderRadius: 2,
-                    backgroundColor: (theme) => theme.palette.mode === 'dark' ? '#2e7d32' : '#e8f5e8',
-                    color: (theme) => theme.palette.mode === 'dark' ? 'white' : 'black',
-                    boxShadow: (theme) => theme.palette.mode === 'dark'
-                      ? '0 4px 12px rgba(0,0,0,0.4)'
-                      : '0 4px 12px rgba(0,0,0,0.15)'
-                  }}>
-                    <Typography variant="h6" gutterBottom sx={{
-                      fontWeight: 'bold',
-                      fontSize: '1.1rem',
-                      mb: 2
-                    }}>
-                      📊 Статистика
-                    </Typography>
-                    <Box sx={{ display: 'grid', gridTemplateColumns: '1fr', gap: 1.5 }}>
-                      <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1 }}>
-                        <Paper variant="outlined" sx={{ p: 1, textAlign: 'center' }}>
-                          <Typography variant="h5" sx={{ fontWeight: 900 }}>
-                            {totalWorktimesCount}
-                          </Typography>
-                          <Typography variant="caption" sx={{ opacity: 0.9 }}>
-                            Нормовремена
-                          </Typography>
-                        </Paper>
-                        <Paper variant="outlined" sx={{ p: 1, textAlign: 'center' }}>
-                          <Typography variant="h5" sx={{ fontWeight: 900 }}>
-                            {totalWorktimesQuantity}
-                          </Typography>
-                          <Typography variant="caption" sx={{ opacity: 0.9 }}>
-                            Количество
-                          </Typography>
-                        </Paper>
-                        <Paper variant="outlined" sx={{ p: 1, textAlign: 'center' }}>
-                          <Typography variant="h5" sx={{ fontWeight: 900 }}>
-                            {totalWorktimesHours.toFixed(2).replace(/\.00$/, '')}ч
-                          </Typography>
-                          <Typography variant="caption" sx={{ opacity: 0.9 }}>
-                            Общо време
-                          </Typography>
-                        </Paper>
-                      </Box>
+                      </Paper>
+                    </Stack>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 800, minWidth: { sm: 140 } }}>
+                        Създадена
+                      </Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 800 }}>
+                        {selectedOrder.created_at ? new Date(selectedOrder.created_at).toLocaleDateString('bg-BG') : '—'}
+                      </Typography>
+                    </Stack>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 800, minWidth: { sm: 140 } }}>
+                        Статус
+                      </Typography>
+                      <Chip
+                        label={selectedOrder.status === 'active' ? 'Активна' : 'Завършена'}
+                        color={selectedOrder.status === 'active' ? 'success' : 'default'}
+                        size="small"
+                        sx={{ fontWeight: 900, width: 'fit-content' }}
+                      />
+                    </Stack>
+                  </Stack>
+                </Paper>
 
-                      <Box>
-                        <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 0.75, opacity: 0.95 }}>
-                          По категории
-                        </Typography>
-                        <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
-                          {Object.entries(worktimeHoursByCategory)
-                            .sort((a, b) => (b[1] || 0) - (a[1] || 0))
-                            .map(([categoryKey, hours]) => (
-                              <Chip
-                                key={categoryKey}
-                                label={`${categoryLabelByKey[categoryKey] || categoryKey}: ${Number(hours || 0)
-                                  .toFixed(2)
-                                  .replace(/\.00$/, '')}ч`}
-                                size="small"
-                                variant="outlined"
-                                sx={{ fontWeight: 700 }}
-                              />
-                            ))}
-                          {totalWorktimesCount === 0 && (
-                            <Typography variant="body2" sx={{ opacity: 0.9 }}>
-                              Няма добавени нормовремена.
-                            </Typography>
-                          )}
-                        </Box>
-                      </Box>
+                <Paper variant="outlined" sx={hcSectionPaperSx}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 900, mb: 1 }}>
+                    Статистика
+                  </Typography>
+
+                  <Box
+                    sx={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                      gap: 1,
+                      mb: 1.5,
+                    }}
+                  >
+                    <Box sx={hcKpiBoxSx}>
+                      <Typography variant="h5" sx={{ fontWeight: 900 }}>{totalWorktimesCount}</Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
+                        Нормовремена
+                      </Typography>
                     </Box>
-                  </Card>
-                </Grid>
-              </Grid>
+                    <Box sx={hcKpiBoxSx}>
+                      <Typography variant="h5" sx={{ fontWeight: 900 }}>{totalWorktimesQuantity}</Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
+                        Количество
+                      </Typography>
+                    </Box>
+                    <Box sx={hcKpiBoxSx}>
+                      <Typography variant="h5" sx={{ fontWeight: 900 }}>{totalWorktimesHours.toFixed(2).replace(/\.00$/, '')}ч</Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
+                        Общо време
+                      </Typography>
+                    </Box>
+                  </Box>
+
+                  <Typography variant="subtitle2" sx={{ fontWeight: 900, mb: 0.75 }}>
+                    По категории
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
+                    {Object.entries(worktimeHoursByCategory)
+                      .sort((a, b) => (b[1] || 0) - (a[1] || 0))
+                      .map(([categoryKey, hours]) => (
+                        <Chip
+                          key={categoryKey}
+                          label={`${categoryLabelByKey[categoryKey] || categoryKey}: ${Number(hours || 0)
+                            .toFixed(2)
+                            .replace(/\.00$/, '')}ч`}
+                          size="small"
+                          variant="outlined"
+                          sx={{ fontWeight: 800 }}
+                        />
+                      ))}
+                    {totalWorktimesCount === 0 ? (
+                      <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 700 }}>
+                        Няма добавени нормовремена.
+                      </Typography>
+                    ) : null}
+                  </Box>
+                </Paper>
+              </Box>
             </Box>
           )}
 
-          <Typography variant="h6" gutterBottom sx={{ color: '#2c3e50', fontWeight: 'bold', mb: 2 }}>
-            🔧 Добавени нормовремена ({displayedOrderWorktimes.length})
-          </Typography>
+          <Stack direction="row" spacing={1} alignItems="baseline" sx={{ mb: 1.25 }}>
+            <Typography variant={isMobile ? 'subtitle1' : 'h6'} sx={{ fontWeight: 900 }}>
+              Добавени нормовремена
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 800 }}>
+              ({displayedOrderWorktimes.length})
+            </Typography>
+          </Stack>
           {displayedOrderWorktimes.length > 0 ? (
             <List dense sx={{ p: 0 }}>
               {displayedOrderWorktimes.map((ow, index) => {
@@ -952,42 +947,31 @@ export default function Orders({ t }) {
               })}
             </List>
           ) : (
-            <Card sx={{
-              p: 4,
-              textAlign: 'center',
-              border: (theme) => `2px dashed ${theme.palette.mode === 'dark' ? '#666' : '#ccc'}`,
-              borderRadius: 2,
-              background: (theme) => theme.palette.mode === 'dark'
-                ? 'linear-gradient(135deg, #34495e 0%, #2c3e50 100%)'
-                : 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)',
-              color: (theme) => theme.palette.mode === 'dark' ? 'white' : 'inherit',
-              boxShadow: (theme) => theme.palette.mode === 'dark'
-                ? '0 4px 12px rgba(0,0,0,0.4)'
-                : '0 4px 12px rgba(0,0,0,0.15)'
-            }}>
-              <Typography variant="h6" sx={{
-                color: 'text.secondary',
-                fontWeight: 'bold',
-                fontSize: '1.1rem',
-                mb: 1
-              }} gutterBottom>
-                📭 Няма добавени нормовремена
+            <Paper
+              variant="outlined"
+              sx={{
+                p: { xs: 2, sm: 3 },
+                textAlign: 'center',
+                border: (theme) => `2px dashed ${theme.palette.divider}`,
+                borderRadius: 2,
+                backgroundColor: (theme) => theme.palette.background.default,
+              }}
+            >
+              <Typography variant="subtitle1" sx={{ fontWeight: 900, mb: 0.75 }}>
+                Няма добавени нормовремена
               </Typography>
-              <Typography variant="body2" sx={{
-                color: 'text.secondary',
-                fontSize: '0.95rem'
-              }}>
-                Използвайте плаващия бутон "+" за да добавите нормовремена към поръчката
+              <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 700 }}>
+                Използвайте бутона "+" за да добавите нормовреме към поръчката.
               </Typography>
-            </Card>
+            </Paper>
           )}
         </DialogContent>
         <DialogActions sx={{
-          p: 3,
+          p: { xs: 1.25, sm: 2 },
           pt: 0,
-          borderTop: (theme) => `2px solid ${theme.palette.mode === 'dark' ? '#555' : '#ccc'}`,
-          backgroundColor: (theme) => theme.palette.mode === 'dark' ? '#2a2a2a' : '#f8f8f8',
-          justifyContent: 'flex-end'
+          borderTop: (theme) => `1px solid ${theme.palette.divider}`,
+          backgroundColor: (theme) => theme.palette.background.paper,
+          justifyContent: 'flex-end',
         }}>
           <IconButton
             onClick={() => setCompleteConfirmOpen(true)}
@@ -1148,18 +1132,7 @@ export default function Orders({ t }) {
           }
         }}
       >
-        <DialogTitle sx={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 1,
-          background: (theme) => theme.palette.mode === 'dark'
-            ? 'linear-gradient(135deg, #2c3e50 0%, #34495e 100%)'
-            : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-          color: 'white',
-          borderBottom: (theme) => `2px solid ${theme.palette.mode === 'dark' ? '#555' : '#ccc'}`,
-          fontWeight: 'bold',
-          fontSize: '1.25rem'
-        }}>
+        <DialogTitle sx={hcDialogTitleSx}>
           <AddIcon sx={{ fontSize: '1.5rem' }} />
           Избери нормовреме за добавяне
         </DialogTitle>
