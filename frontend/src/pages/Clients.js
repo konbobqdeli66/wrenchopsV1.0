@@ -240,6 +240,27 @@ export default function Clients({ t, setPage }) {
     }
   };
 
+  const handleDeleteVehicleFromClient = async (clientId, vehicle) => {
+    const vehicleId = vehicle?.id;
+    if (!clientId || !vehicleId) return;
+    const reg = String(vehicle?.reg_number || '').trim();
+    const label = reg ? ` (${reg})` : '';
+    if (!window.confirm(`Да се премахне ли този автомобил${label} от клиента?`)) return;
+
+    try {
+      await axios.delete(`${getApiBaseUrl()}/vehicles/${vehicleId}`);
+      // Optimistic UI update (avoid refetching all clients)
+      setClientVehicles((prev) => {
+        const next = { ...(prev || {}) };
+        const list = Array.isArray(next[clientId]) ? next[clientId] : [];
+        next[clientId] = list.filter((v) => v?.id !== vehicleId);
+        return next;
+      });
+    } catch (error) {
+      alert('Грешка при премахване на автомобила.');
+    }
+  };
+
 
   return (
     <Container maxWidth="xl" sx={{ py: { xs: 2, md: 4 } }}>
@@ -391,6 +412,11 @@ export default function Clients({ t, setPage }) {
                                       // Navigate to vehicle details/history
                                       setPage(4); // Vehicles page
                                     }}
+                                    onDelete={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteVehicleFromClient(c.id, vehicle);
+                                    }}
+                                    deleteIcon={<DeleteIcon />}
                                     sx={{ cursor: 'pointer' }}
                                   />
                                 ))}
@@ -831,6 +857,18 @@ export default function Clients({ t, setPage }) {
               secondary={vehicle.reg_number}
             />
             <AssignmentIcon sx={{ ml: 1, color: 'primary.main' }} />
+
+            <IconButton
+              size="small"
+              aria-label="delete vehicle"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDeleteVehicleFromClient(selectedClient?.id, vehicle);
+              }}
+              sx={{ ml: 1 }}
+            >
+              <DeleteIcon fontSize="small" color="error" />
+            </IconButton>
           </MenuItem>
         ))}
         {(!clientVehicles[selectedClient?.id] || clientVehicles[selectedClient?.id].length === 0) && (
