@@ -45,6 +45,10 @@ const DEFAULT_TAGLINE_SHORT = 'Operations. Optimized.';
 const DEFAULT_TAGLINE_SECONDARY = 'The Operating System for Automotive Workshops';
 const DEFAULT_TITLE = `${DEFAULT_BRAND_NAME} — ${DEFAULT_TAGLINE_SHORT} · ${DEFAULT_TAGLINE_SECONDARY}`;
 
+// Auto logout after inactivity
+const IDLE_LOGOUT_MS = 12 * 60 * 60 * 1000; // 12 hours
+const LAST_ACTIVITY_KEY = 'last_activity_ts';
+
 // Material "build" icon as inline SVG for favicon fallback
 const FALLBACK_ICON_SVG_DATA_URL =
   "data:image/svg+xml;charset=utf-8," +
@@ -387,8 +391,59 @@ function MainApp() {
 
   const forceLogout = useCallback(() => {
     localStorage.removeItem('token');
+    localStorage.removeItem(LAST_ACTIVITY_KEY);
     window.location.href = '/login';
   }, []);
+
+  // Auto-logout on inactivity (12 hours)
+  useEffect(() => {
+    // MainApp is rendered only when a token exists, but keep the guard anyway.
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    // Reset idle timer at app start to avoid stale timestamps from previous sessions.
+    localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now()));
+
+    let lastWrite = 0;
+    const recordActivity = () => {
+      const now = Date.now();
+      // Throttle writes to localStorage (avoid spamming on mousemove)
+      if (now - lastWrite < 60 * 1000) return;
+      lastWrite = now;
+      localStorage.setItem(LAST_ACTIVITY_KEY, String(now));
+    };
+
+    const checkIdle = () => {
+      const last = Number(localStorage.getItem(LAST_ACTIVITY_KEY) || 0);
+      if (!last) return;
+      const now = Date.now();
+      if (now - last >= IDLE_LOGOUT_MS) {
+        forceLogout();
+      }
+    };
+
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'];
+    events.forEach((ev) => window.addEventListener(ev, recordActivity, { passive: true }));
+
+    const interval = setInterval(checkIdle, 60 * 1000);
+
+    // Keep multiple tabs in sync
+    const onStorage = (e) => {
+      if (e.key === LAST_ACTIVITY_KEY || e.key === 'token') {
+        checkIdle();
+      }
+    };
+    window.addEventListener('storage', onStorage);
+
+    // Initial check
+    checkIdle();
+
+    return () => {
+      clearInterval(interval);
+      events.forEach((ev) => window.removeEventListener(ev, recordActivity));
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [forceLogout]);
 
   // Save preferences to backend
   const savePreferencesToBackend = async (prefs) => {
