@@ -1,3 +1,12 @@
+html, body, #root {
+  height: 100%;
+  width: 100%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
@@ -5,9 +14,42 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* Mobile: avoid accidental horizontal scrolling due to wide tables/chips */
+  overflow-x: hidden;
 }
 
 code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
+}
+
+/* Mobile auto-fit (responsive) */
+@media (max-width: 768px) {
+  /* Slightly smaller padding so content fits better */
+  .MuiContainer-root {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
+  /* Make MUI tables less likely to overflow horizontally */
+  .MuiTable-root {
+    table-layout: fixed;
+    width: 100%;
+  }
+
+  .MuiTableCell-root {
+    padding: 6px 8px !important;
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  /* Chips can easily overflow; allow wrapping */
+  .MuiChip-root {
+    max-width: 100%;
+  }
+
+  .MuiChip-label {
+    white-space: normal;
+  }
 }
