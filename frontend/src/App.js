@@ -5,7 +5,7 @@ import { CssBaseline, Box, IconButton, useMediaQuery, AppBar, Toolbar, Typograph
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { getApiBaseUrl } from "./api";
-import { Menu, MenuItem, ListItemIcon, ListItemText, Divider, Dialog, DialogTitle, DialogContent, DialogActions, Button, Drawer, List, ListItem, ListItemButton, ListItemText as MuiListItemText, Fab } from "@mui/material";
+import { Menu, MenuItem, ListItemIcon, ListItemText, Divider, Dialog, DialogTitle, DialogContent, DialogActions, Button, Drawer, List, ListItem, ListItemButton, ListItemText as MuiListItemText, Paper } from "@mui/material";
 import Brightness4Icon from "@mui/icons-material/Brightness4";
 import Brightness7Icon from "@mui/icons-material/Brightness7";
 import Switch from "@mui/material/Switch";
@@ -995,34 +995,44 @@ function MainApp() {
           </DialogActions>
         </Dialog>
 
-        {/* MOBILE NAV: single Home button that opens a tab menu */}
+        {/* MOBILE NAV: bottom bar with a single Home button that opens a tab menu */}
         {isMobile && (
           <>
-            <Box
+            <Paper
+              elevation={6}
               sx={{
                 position: 'fixed',
                 left: 0,
                 right: 0,
-                bottom: 14,
-                display: 'flex',
-                justifyContent: 'center',
+                bottom: 0,
                 zIndex: 1400,
+                borderTop: (theme) => `1px solid ${theme.palette.divider}`,
               }}
             >
-              <Fab
-                color="primary"
-                aria-label="open navigation"
-                onClick={handleMobileNavOpen}
+              <Box
                 sx={{
-                  boxShadow: (theme) =>
-                    theme.palette.mode === 'dark'
-                      ? '0 10px 28px rgba(0,0,0,0.55)'
-                      : '0 10px 28px rgba(0,0,0,0.25)',
+                  height: 64,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                 }}
               >
-                <HomeIcon />
-              </Fab>
-            </Box>
+                <IconButton
+                  aria-label="open navigation"
+                  onClick={handleMobileNavOpen}
+                  sx={{
+                    color: darkMode ? 'common.white' : 'common.black',
+                    bgcolor: darkMode ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.08)',
+                    border: (theme) => `1px solid ${theme.palette.divider}`,
+                    '&:hover': {
+                      bgcolor: darkMode ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.12)',
+                    },
+                  }}
+                >
+                  <HomeIcon />
+                </IconButton>
+              </Box>
+            </Paper>
 
             <Menu
               anchorEl={mobileNavAnchorEl}
