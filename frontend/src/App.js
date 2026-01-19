@@ -1005,7 +1005,8 @@ function MainApp() {
                 left: 0,
                 right: 0,
                 bottom: 0,
-                zIndex: 1400,
+                // Keep the bar ABOVE page content, but BELOW dialogs/menus (Modal is 1300)
+                zIndex: (theme) => theme.zIndex.appBar,
                 borderTop: (theme) => `1px solid ${theme.palette.divider}`,
               }}
             >
