@@ -5,7 +5,7 @@ import { CssBaseline, Box, IconButton, useMediaQuery, AppBar, Toolbar, Typograph
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { getApiBaseUrl } from "./api";
-import { BottomNavigation, BottomNavigationAction, Paper, Menu, MenuItem, ListItemIcon, ListItemText, Divider, Dialog, DialogTitle, DialogContent, DialogActions, Button, Drawer, List, ListItem, ListItemButton, ListItemText as MuiListItemText } from "@mui/material";
+import { Menu, MenuItem, ListItemIcon, ListItemText, Divider, Dialog, DialogTitle, DialogContent, DialogActions, Button, Drawer, List, ListItem, ListItemButton, ListItemText as MuiListItemText, Fab } from "@mui/material";
 import Brightness4Icon from "@mui/icons-material/Brightness4";
 import Brightness7Icon from "@mui/icons-material/Brightness7";
 import Switch from "@mui/material/Switch";
@@ -369,6 +369,7 @@ function MainApp() {
     return saved || 'pink';
   });
   const [anchorEl, setAnchorEl] = useState(null);
+  const [mobileNavAnchorEl, setMobileNavAnchorEl] = useState(null);
   const [languageAnchorEl, setLanguageAnchorEl] = useState(null);
   const [colorDialogOpen, setColorDialogOpen] = useState(false);
   const [userRole, setUserRole] = useState('user');
@@ -379,6 +380,7 @@ function MainApp() {
   const [brandLogoDataUrl, setBrandLogoDataUrl] = useState('');
   const [brandFontSize, setBrandFontSize] = useState(22);
   const open = Boolean(anchorEl);
+  const mobileNavOpen = Boolean(mobileNavAnchorEl);
   const languageOpen = Boolean(languageAnchorEl);
 
   const theme = useMemo(
@@ -559,6 +561,14 @@ function MainApp() {
 
   const handleMenuClose = () => {
     setAnchorEl(null);
+  };
+
+  const handleMobileNavOpen = (event) => {
+    setMobileNavAnchorEl(event.currentTarget);
+  };
+
+  const handleMobileNavClose = () => {
+    setMobileNavAnchorEl(null);
   };
 
   const handleLanguageMenuClick = (event) => {
@@ -814,7 +824,7 @@ function MainApp() {
             </Drawer>
           )}
 
-          <Box sx={{ flexGrow: 1, pb: isMobile ? 7 : 0, pt: isMobile ? 2 : 10, minHeight: '100vh' }}>
+           <Box sx={{ flexGrow: 1, pb: isMobile ? 10 : 0, pt: isMobile ? 2 : 10, minHeight: '100vh' }}>
 
         {/* SETTINGS BUTTON (mobile) */}
         {isMobile && (
@@ -856,38 +866,6 @@ function MainApp() {
             horizontal: 'right',
           }}
         >
-          {/* MOBILE: allow switching tabs (pages) from the settings dropdown */}
-          {isMobile && (
-            <>
-              {navigationItems.map((item) => (
-                (() => {
-                  const enabled = canAccessModule(item.module);
-                  return (
-                <MenuItem
-                  key={`nav-${item.page}`}
-                  selected={page === item.page}
-                  disabled={!enabled}
-                  onClick={() => {
-                    if (!enabled) return;
-                    setPage(item.page);
-                    handleMenuClose();
-                  }}
-                  sx={{
-                    filter: enabled ? 'none' : 'grayscale(1)',
-                    opacity: enabled ? 1 : 0.65,
-                  }}
-                >
-                  <ListItemIcon>{item.icon}</ListItemIcon>
-                  <ListItemText>{item.label}</ListItemText>
-                </MenuItem>
-                  );
-                })()
-              ))}
-
-              <Divider />
-            </>
-          )}
-
           <MenuItem>
             <ListItemIcon>
               {darkMode ? <Brightness7Icon /> : <Brightness4Icon />}
@@ -1017,6 +995,59 @@ function MainApp() {
           </DialogActions>
         </Dialog>
 
+        {/* MOBILE NAV: single Home button that opens a tab menu */}
+        {isMobile && (
+          <>
+            <Box
+              sx={{
+                position: 'fixed',
+                left: 0,
+                right: 0,
+                bottom: 14,
+                display: 'flex',
+                justifyContent: 'center',
+                zIndex: 1400,
+              }}
+            >
+              <Fab
+                color="primary"
+                aria-label="open navigation"
+                onClick={handleMobileNavOpen}
+                sx={{
+                  boxShadow: (theme) =>
+                    theme.palette.mode === 'dark'
+                      ? '0 10px 28px rgba(0,0,0,0.55)'
+                      : '0 10px 28px rgba(0,0,0,0.25)',
+                }}
+              >
+                <HomeIcon />
+              </Fab>
+            </Box>
+
+            <Menu
+              anchorEl={mobileNavAnchorEl}
+              open={mobileNavOpen}
+              onClose={handleMobileNavClose}
+              anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+              transformOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+            >
+              {navigationItems.map((item) => (
+                <MenuItem
+                  key={`mobile-nav-${item.page}`}
+                  selected={page === item.page}
+                  onClick={() => {
+                    setPage(item.page);
+                    handleMobileNavClose();
+                  }}
+                >
+                  <ListItemIcon>{item.icon}</ListItemIcon>
+                  <ListItemText>{item.label}</ListItemText>
+                </MenuItem>
+              ))}
+            </Menu>
+          </>
+        )}
+
         {/* PAGE CONTENT */}
         <Container maxWidth="xl" sx={{ py: 2 }}>
           {page === 0 && <Home setPage={setPage} t={t} />}
@@ -1028,52 +1059,7 @@ function MainApp() {
           {page === 6 && userRole === 'admin' && <Admin t={t} />}
         </Container>
 
-            {/* BOTTOM NAVIGATION - MOBILE ONLY */}
-            {isMobile && (
-              <Paper
-                sx={{ position: "fixed", bottom: 0, left: 0, right: 0 }}
-                elevation={3}
-              >
-                <BottomNavigation
-                  showLabels
-                  value={page}
-                  onChange={(event, newValue) => {
-                    const nextItem = navigationItems.find((x) => x.page === newValue);
-                    if (nextItem && !canAccessModule(nextItem.module)) return;
-                    setPage(newValue);
-                  }}
-                  sx={{
-                    overflowX: 'auto',
-                    overflowY: 'hidden',
-                    flexWrap: 'nowrap',
-                    justifyContent: 'flex-start',
-                    WebkitOverflowScrolling: 'touch',
-                    scrollbarWidth: 'none',
-                    '&::-webkit-scrollbar': { display: 'none' },
-                  }}
-                >
-                  {navigationItems.map((item) => {
-                    const enabled = canAccessModule(item.module);
-                    return (
-                    <BottomNavigationAction
-                      key={item.page}
-                      value={item.page}
-                      label={item.label}
-                      icon={item.icon}
-                      disabled={!enabled}
-                      sx={{
-                        flex: '0 0 auto',
-                        minWidth: 96,
-                        maxWidth: 160,
-                        filter: enabled ? 'none' : 'grayscale(1)',
-                        opacity: enabled ? 1 : 0.65,
-                      }}
-                    />
-                    );
-                  })}
-                </BottomNavigation>
-              </Paper>
-            )}
+            {/* Bottom navigation removed (replaced by single Home button menu on mobile). */}
           </Box>
         </Box>
       </ThemeProvider>
