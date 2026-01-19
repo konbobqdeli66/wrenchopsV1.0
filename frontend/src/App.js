@@ -625,11 +625,9 @@ function MainApp() {
     return Number(p.can_access_module) === 1 && Number(p.can_delete) === 1;
   }, [userRole, userPermissions]);
 
-  // Special rule: when invoices access is disabled, hide the tab entirely.
-  const navigationItems = allNavigationItems.filter((item) => {
-    if (item.module !== 'invoices') return true;
-    return canAccessModule('invoices');
-  });
+  // Hide tabs completely when the user does not have access.
+  // (Admin always sees everything via canAccessModule().)
+  const navigationItems = allNavigationItems.filter((item) => canAccessModule(item.module));
 
   // If access is revoked while the app is open, fall back to Home.
   useEffect(() => {
