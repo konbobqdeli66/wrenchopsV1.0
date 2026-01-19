@@ -34,28 +34,29 @@ router.get('/search', checkPermission('vehicles', 'read'), (req, res) => {
   const params = [];
 
   if (q) {
-    query += ' AND (v.reg_number LIKE ? OR v.brand LIKE ? OR v.model LIKE ? OR c.name LIKE ?)';
+    // Case-insensitive search (NOCASE)
+    query += ' AND (v.reg_number LIKE ? COLLATE NOCASE OR v.brand LIKE ? COLLATE NOCASE OR v.model LIKE ? COLLATE NOCASE OR c.name LIKE ? COLLATE NOCASE)';
     const searchTerm = `%${q}%`;
     params.push(searchTerm, searchTerm, searchTerm, searchTerm);
   }
 
   if (reg_number) {
-    query += ' AND v.reg_number LIKE ?';
+    query += ' AND v.reg_number LIKE ? COLLATE NOCASE';
     params.push(`%${reg_number}%`);
   }
 
   if (vin) {
-    query += ' AND v.vin LIKE ?';
+    query += ' AND v.vin LIKE ? COLLATE NOCASE';
     params.push(`%${vin}%`);
   }
 
   if (brand) {
-    query += ' AND v.brand LIKE ?';
+    query += ' AND v.brand LIKE ? COLLATE NOCASE';
     params.push(`%${brand}%`);
   }
 
   if (model) {
-    query += ' AND v.model LIKE ?';
+    query += ' AND v.model LIKE ? COLLATE NOCASE';
     params.push(`%${model}%`);
   }
 

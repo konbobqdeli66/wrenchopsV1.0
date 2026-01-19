@@ -130,7 +130,7 @@ router.get('/search', checkPermission('orders', 'read'), (req, res) => {
           LEFT JOIN order_worktimes ow ON ow.order_id = o.id
           LEFT JOIN worktimes w ON w.id = ow.worktime_id
           WHERE o.status = 'active'
-            AND (o.reg_number LIKE ? OR o.client_name LIKE ?)
+            AND (o.reg_number LIKE ? COLLATE NOCASE OR o.client_name LIKE ? COLLATE NOCASE)
           GROUP BY o.id
           ORDER BY o.created_at DESC
         `,

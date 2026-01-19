@@ -228,7 +228,8 @@ router.get('/', checkPermission('clients', 'read'), (req, res) => {
 router.get('/search', checkPermission('clients', 'read'), (req, res) => {
     const { q } = req.query;
     db.all(
-        'SELECT * FROM clients WHERE name LIKE ? OR phone LIKE ?',
+        // Case-insensitive search (NOCASE)
+        'SELECT * FROM clients WHERE name LIKE ? COLLATE NOCASE OR phone LIKE ? COLLATE NOCASE',
         [`%${q}%`, `%${q}%`],
         (err, rows) => {
             if (err) {
