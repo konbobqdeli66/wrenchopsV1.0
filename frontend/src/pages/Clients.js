@@ -322,6 +322,7 @@ export default function Clients({ t, setPage }) {
                   button
                   onClick={(event) => handleClientClick(event, c)}
                   sx={{
+                    overflowX: 'hidden',
                     '&:hover': {
                       backgroundColor: 'action.hover',
                     },
@@ -330,10 +331,11 @@ export default function Clients({ t, setPage }) {
                   }}
                 >
                   <ListItemText
+                    sx={{ minWidth: 0 }}
                     primary={
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                         <BusinessIcon color="primary" />
-                        <Typography variant="h6">{c.name}</Typography>
+                        <Typography variant="h6" sx={{ minWidth: 0, overflowWrap: 'anywhere' }}>{c.name}</Typography>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: 'auto' }}>
                           <Typography
                             variant="body2"
@@ -366,7 +368,7 @@ export default function Clients({ t, setPage }) {
                       </Box>
                     }
                     secondary={
-                      <Box sx={{ mt: 1 }}>
+                      <Box sx={{ mt: 1, minWidth: 0 }}>
                         <Typography variant="body2" color="text.secondary">
                           📍 {c.address}
                         </Typography>
@@ -447,7 +449,7 @@ export default function Clients({ t, setPage }) {
                             </IconButton>
                           </Box>
                         </Box>
-                        <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
+                        <Box sx={{ mt: 1, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                           <Button
                             size="small"
                             variant="contained"
@@ -456,6 +458,7 @@ export default function Clients({ t, setPage }) {
                             sx={{
                               minHeight: { xs: 36, sm: 32 },
                               fontSize: { xs: '0.875rem', sm: '0.75rem' },
+                              flex: { xs: '1 1 100%', sm: '0 0 auto' },
                             }}
                           >
                             Създай поръчка
@@ -470,7 +473,8 @@ export default function Clients({ t, setPage }) {
                             }}
                             sx={{
                               minHeight: { xs: 36, sm: 32 },
-                              fontSize: { xs: '0.875rem', sm: '0.75rem' }
+                              fontSize: { xs: '0.875rem', sm: '0.75rem' },
+                              flex: { xs: '1 1 100%', sm: '0 0 auto' },
                             }}
                           >
                             {t('edit')}
@@ -486,7 +490,8 @@ export default function Clients({ t, setPage }) {
                             }}
                             sx={{
                               minHeight: { xs: 36, sm: 32 },
-                              fontSize: { xs: '0.875rem', sm: '0.75rem' }
+                              fontSize: { xs: '0.875rem', sm: '0.75rem' },
+                              flex: { xs: '1 1 100%', sm: '0 0 auto' },
                             }}
                           >
                             {t('delete')}
