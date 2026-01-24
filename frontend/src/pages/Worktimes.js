@@ -54,7 +54,10 @@ export default function Worktimes({ t }) {
     title: "",
     hours: "",
     vehicle_type: 'truck',
+    // Main category key (e.g. "engine")
     component_type: "regular",
+    // Truck-only subcategory numeric key (e.g. "21")
+    subcomponent_type: "",
   });
 
   const categories = getCategoriesForVehicleType(vehicleTypeFilter);
@@ -125,12 +128,28 @@ export default function Worktimes({ t }) {
   }
 
   async function createWorktime() {
+    const componentTypeForSave =
+      form.vehicle_type === 'truck'
+        ? (String(form.subcomponent_type || '').trim() || form.component_type)
+        : form.component_type;
+
     await axios.post(`${getApiBaseUrl()}/worktimes`, {
       title: form.title,
       hours: form.hours,
-      component_type: form.component_type,
+      component_type: componentTypeForSave,
     });
-    setForm({ title: "", hours: "", vehicle_type: form.vehicle_type, component_type: "regular" });
+    // Reset but keep selected vehicle type and default category/subcategory.
+    const vt = form.vehicle_type;
+    const firstCatKey = getCategoriesForVehicleType(vt)[0]?.key || 'regular';
+    const firstSubKey =
+      vt === 'truck' ? (getSubcategoriesForCategoryKey(vt, firstCatKey)[0]?.key || '') : '';
+    setForm({
+      title: "",
+      hours: "",
+      vehicle_type: vt,
+      component_type: firstCatKey,
+      subcomponent_type: firstSubKey,
+    });
     loadWorktimes();
   }
 
@@ -174,7 +193,16 @@ export default function Worktimes({ t }) {
                         onChange={(e) => {
                           const vt = e.target.value;
                           const firstKey = getCategoriesForVehicleType(vt)[0]?.key || 'regular';
-                          setForm({ ...form, vehicle_type: vt, component_type: firstKey });
+                          const firstSubKey =
+                            vt === 'truck'
+                              ? (getSubcategoriesForCategoryKey(vt, firstKey)[0]?.key || '')
+                              : '';
+                          setForm({
+                            ...form,
+                            vehicle_type: vt,
+                            component_type: firstKey,
+                            subcomponent_type: firstSubKey,
+                          });
                         }}
                         label="Тип"
                       >
@@ -188,7 +216,14 @@ export default function Worktimes({ t }) {
                       <InputLabel>Категория</InputLabel>
                       <Select
                         value={form.component_type}
-                        onChange={(e) => setForm({ ...form, component_type: e.target.value })}
+                        onChange={(e) => {
+                          const catKey = e.target.value;
+                          const firstSubKey =
+                            form.vehicle_type === 'truck'
+                              ? (getSubcategoriesForCategoryKey(form.vehicle_type, catKey)[0]?.key || '')
+                              : '';
+                          setForm({ ...form, component_type: catKey, subcomponent_type: firstSubKey });
+                        }}
                         label="Категория"
                       >
                         {getCategoriesForVehicleType(form.vehicle_type).map((cat) => (
@@ -199,6 +234,26 @@ export default function Worktimes({ t }) {
                       </Select>
                     </FormControl>
                   </Grid>
+
+                  {/* Truck subcategory (submenu) */}
+                  {form.vehicle_type === 'truck' ? (
+                    <Grid item xs={12}>
+                      <FormControl fullWidth variant="outlined">
+                        <InputLabel>Подменю</InputLabel>
+                        <Select
+                          value={form.subcomponent_type}
+                          onChange={(e) => setForm({ ...form, subcomponent_type: e.target.value })}
+                          label="Подменю"
+                        >
+                          {getSubcategoriesForCategoryKey(form.vehicle_type, form.component_type).map((sub) => (
+                            <MenuItem key={sub.key} value={sub.key}>
+                              {sub.no}. {sub.label}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </Grid>
+                  ) : null}
                   <Grid item xs={12}>
                     <TextField
                       fullWidth
@@ -249,7 +304,14 @@ export default function Worktimes({ t }) {
                     onChange={(e) => {
                       const vt = e.target.value;
                       const firstKey = getCategoriesForVehicleType(vt)[0]?.key || 'regular';
-                      setForm({ ...form, vehicle_type: vt, component_type: firstKey });
+                      const firstSubKey =
+                        vt === 'truck' ? (getSubcategoriesForCategoryKey(vt, firstKey)[0]?.key || '') : '';
+                      setForm({
+                        ...form,
+                        vehicle_type: vt,
+                        component_type: firstKey,
+                        subcomponent_type: firstSubKey,
+                      });
                     }}
                     label="Тип"
                   >
@@ -263,7 +325,14 @@ export default function Worktimes({ t }) {
                   <InputLabel>Категория</InputLabel>
                   <Select
                     value={form.component_type}
-                    onChange={(e) => setForm({ ...form, component_type: e.target.value })}
+                    onChange={(e) => {
+                      const catKey = e.target.value;
+                      const firstSubKey =
+                        form.vehicle_type === 'truck'
+                          ? (getSubcategoriesForCategoryKey(form.vehicle_type, catKey)[0]?.key || '')
+                          : '';
+                      setForm({ ...form, component_type: catKey, subcomponent_type: firstSubKey });
+                    }}
                     label="Категория"
                   >
                     {getCategoriesForVehicleType(form.vehicle_type).map((cat) => (
@@ -274,6 +343,26 @@ export default function Worktimes({ t }) {
                   </Select>
                 </FormControl>
               </Grid>
+
+              {/* Truck subcategory (submenu) */}
+              {form.vehicle_type === 'truck' ? (
+                <Grid item xs={12}>
+                  <FormControl fullWidth variant="outlined">
+                    <InputLabel>Подменю</InputLabel>
+                    <Select
+                      value={form.subcomponent_type}
+                      onChange={(e) => setForm({ ...form, subcomponent_type: e.target.value })}
+                      label="Подменю"
+                    >
+                      {getSubcategoriesForCategoryKey(form.vehicle_type, form.component_type).map((sub) => (
+                        <MenuItem key={sub.key} value={sub.key}>
+                          {sub.no}. {sub.label}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+              ) : null}
               <Grid item xs={12}>
                 <TextField
                   fullWidth
