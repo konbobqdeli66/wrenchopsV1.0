@@ -585,6 +585,14 @@ function MainApp() {
     handleMenuClose();
   };
 
+  const handleNavigateToPage = (targetPage) => {
+    setPage(targetPage);
+    // Close any open menus (mobile nav + settings + language submenu)
+    handleMobileNavClose();
+    handleLanguageMenuClose();
+    handleMenuClose();
+  };
+
   const handleLogout = () => {
     forceLogout();
   };
@@ -866,6 +874,23 @@ function MainApp() {
             horizontal: 'right',
           }}
         >
+          {/* MOBILE: allow switching tabs from the Settings dropdown as well */}
+          {isMobile && (
+            <>
+              {navigationItems.map((item) => (
+                <MenuItem
+                  key={`settings-nav-${item.page}`}
+                  selected={page === item.page}
+                  onClick={() => handleNavigateToPage(item.page)}
+                >
+                  <ListItemIcon>{item.icon}</ListItemIcon>
+                  <ListItemText>{item.label}</ListItemText>
+                </MenuItem>
+              ))}
+              <Divider />
+            </>
+          )}
+
           <MenuItem>
             <ListItemIcon>
               {darkMode ? <Brightness7Icon /> : <Brightness4Icon />}

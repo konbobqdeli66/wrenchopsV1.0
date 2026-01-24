@@ -9,6 +9,7 @@ import {
   Grid,
   Card,
   CardContent,
+  Paper,
   List,
   ListItem,
   ListItemText,
@@ -36,7 +37,9 @@ import { getApiBaseUrl } from "../api";
 import {
   formatCategoryLabel,
   getCategoriesForVehicleType,
+  getSubcategoriesForCategoryKey,
   getWorktimeCategoryKey,
+  getWorktimeSubcategoryKey,
 } from "../utils/worktimeClassification";
 
 export default function Worktimes({ t }) {
@@ -44,6 +47,7 @@ export default function Worktimes({ t }) {
   const [itemsPerPage, setItemsPerPage] = useState(25);
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState('truck');
   const [activeCategoryKey, setActiveCategoryKey] = useState('regular');
+  const [activeSubcategoryKey, setActiveSubcategoryKey] = useState('');
   const isPhone = useMediaQuery('(max-width:600px)');
   const [search, setSearch] = useState('');
   const [form, setForm] = useState({
@@ -54,6 +58,10 @@ export default function Worktimes({ t }) {
   });
 
   const categories = getCategoriesForVehicleType(vehicleTypeFilter);
+  const subcategories = useMemo(
+    () => getSubcategoriesForCategoryKey(vehicleTypeFilter, activeCategoryKey),
+    [vehicleTypeFilter, activeCategoryKey]
+  );
 
   const countByCategoryKey = useMemo(() => {
     const map = {};
@@ -69,10 +77,16 @@ export default function Worktimes({ t }) {
     return (worktimes || [])
       .filter((w) => getWorktimeCategoryKey(w, vehicleTypeFilter) === activeCategoryKey)
       .filter((w) => {
+        // Subcategory only applies to trucks. If no subcategory is selected -> show all.
+        if (vehicleTypeFilter === 'trailer') return true;
+        if (!activeSubcategoryKey) return true;
+        return getWorktimeSubcategoryKey(w, vehicleTypeFilter) === activeSubcategoryKey;
+      })
+      .filter((w) => {
         if (!q) return true;
         return String(w?.title || '').toLowerCase().includes(q);
       });
-  }, [worktimes, vehicleTypeFilter, activeCategoryKey, search]);
+  }, [worktimes, vehicleTypeFilter, activeCategoryKey, activeSubcategoryKey, search]);
 
   useEffect(() => {
     loadWorktimes();
@@ -84,7 +98,26 @@ export default function Worktimes({ t }) {
     if (!keys.has(activeCategoryKey)) {
       setActiveCategoryKey(getCategoriesForVehicleType(vehicleTypeFilter)[0]?.key || 'regular');
     }
+
+    // Reset subcategory when switching vehicle type.
+    if (vehicleTypeFilter === 'trailer') {
+      setActiveSubcategoryKey('');
+    }
   }, [vehicleTypeFilter, activeCategoryKey]);
+
+  useEffect(() => {
+    // Keep selected subcategory valid when category changes.
+    if (vehicleTypeFilter === 'trailer') {
+      setActiveSubcategoryKey('');
+      return;
+    }
+
+    const list = getSubcategoriesForCategoryKey(vehicleTypeFilter, activeCategoryKey);
+    const keys = new Set(list.map((s) => s.key));
+    if (activeSubcategoryKey && !keys.has(activeSubcategoryKey)) {
+      setActiveSubcategoryKey('');
+    }
+  }, [vehicleTypeFilter, activeCategoryKey, activeSubcategoryKey]);
 
   async function loadWorktimes() {
     const res = await axios.get(`${getApiBaseUrl()}/worktimes`);
@@ -355,7 +388,11 @@ export default function Worktimes({ t }) {
                     return (
                       <ButtonBase
                         key={cat.key}
-                        onClick={() => setActiveCategoryKey(cat.key)}
+                        onClick={() => {
+                          setActiveCategoryKey(cat.key);
+                          // Reset subcategory when category changes.
+                          setActiveSubcategoryKey('');
+                        }}
                         sx={(theme) => ({
                           width: '100%',
                           textAlign: 'left',
@@ -432,6 +469,68 @@ export default function Worktimes({ t }) {
                   })}
                 </Box>
               </Box>
+
+              {/* Truck subcategory list (screenshot-style list with chevron) */}
+              {vehicleTypeFilter !== 'trailer' && subcategories.length > 0 ? (
+                <Box sx={{ mt: 1.25 }}>
+                  <Paper
+                    variant="outlined"
+                    sx={{
+                      borderRadius: 2,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <List dense sx={{ p: 0 }}>
+                      {/* "All" row */}
+                      <ListItem
+                        disablePadding
+                        selected={!activeSubcategoryKey}
+                        onClick={() => setActiveSubcategoryKey('')}
+                        sx={{ cursor: 'pointer' }}
+                      >
+                        <ListItemText
+                          primary={t('all')}
+                          primaryTypographyProps={{ sx: { fontWeight: 900 } }}
+                          sx={{ px: 1.5, py: 0.75 }}
+                        />
+                      </ListItem>
+                      <Divider />
+
+                      {subcategories.map((sub, idx) => {
+                        const isSelected = activeSubcategoryKey === sub.key;
+                        return (
+                          <div key={sub.key}>
+                            <ListItem
+                              disablePadding
+                              selected={isSelected}
+                              onClick={() => setActiveSubcategoryKey(sub.key)}
+                              sx={{ cursor: 'pointer' }}
+                            >
+                              <ListItemText
+                                primary={`${sub.no}. ${sub.label}`}
+                                primaryTypographyProps={{
+                                  sx: {
+                                    fontWeight: 800,
+                                    // Match screenshot: single line with ellipsis
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                  },
+                                }}
+                                sx={{ px: 1.5, py: 0.75 }}
+                              />
+                              <Box sx={{ pr: 1.25, color: 'text.secondary', fontWeight: 900 }}>
+                                »
+                              </Box>
+                            </ListItem>
+                            {idx < subcategories.length - 1 ? <Divider /> : null}
+                          </div>
+                        );
+                      })}
+                    </List>
+                  </Paper>
+                </Box>
+              ) : null}
 
               <Box sx={{ mt: 2 }}>
                 <Box
