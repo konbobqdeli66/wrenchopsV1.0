@@ -564,6 +564,23 @@ db.run('UPDATE users SET token_version = COALESCE(token_version, 0)', (err) => {
   }
 });
 
+// --- Worktimes: separate lists for truck vs trailer ---
+// Add vehicle_type to existing DBs (CREATE TABLE IF NOT EXISTS does not add new columns)
+db.run("ALTER TABLE worktimes ADD COLUMN vehicle_type TEXT DEFAULT 'truck'", (err) => {
+  const msg = String(err?.message || '').toLowerCase();
+  if (err && !msg.includes('duplicate column') && !msg.includes('no such table')) {
+    console.warn('Could not add worktimes.vehicle_type column:', err.message);
+  }
+});
+
+// Backfill vehicle_type for existing rows (keep safe default 'truck')
+db.run("UPDATE worktimes SET vehicle_type = COALESCE(vehicle_type, 'truck')", (err) => {
+  const msg = String(err?.message || '').toLowerCase();
+  if (err && !msg.includes('no such column') && !msg.includes('no such table')) {
+    console.warn('Could not backfill worktimes.vehicle_type:', err.message);
+  }
+});
+
 db.run("ALTER TABLE user_preferences ADD COLUMN appbar_gradient TEXT", (err) => {
   const msg = String(err?.message || '').toLowerCase();
   if (err && !msg.includes('duplicate column') && !msg.includes('no such table')) {

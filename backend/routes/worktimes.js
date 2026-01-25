@@ -33,19 +33,25 @@ const allAsync = (sql, params = []) =>
 
 const normalize = (v) => String(v ?? '').trim();
 
-const WORKTIME_HEADERS_BG = ['ID', 'Заглавие*', 'Часове*', 'Компонент'];
+const WORKTIME_HEADERS_BG_V1 = ['ID', 'Заглавие*', 'Часове*', 'Компонент'];
+const WORKTIME_HEADERS_BG_V2 = ['ID', 'Заглавие*', 'Часове*', 'Компонент', 'Тип'];
 
-const makeWorktimesWorkbook = (rows) => {
+const makeWorktimesWorkbook = (rows, { includeVehicleType = true } = {}) => {
   const wb = XLSX.utils.book_new();
-  const data = [WORKTIME_HEADERS_BG];
+  const header = includeVehicleType ? WORKTIME_HEADERS_BG_V2 : WORKTIME_HEADERS_BG_V1;
+  const data = [header];
 
   (rows || []).forEach((r) => {
-    data.push([
+    const base = [
       r?.id ?? '',
       r?.title ?? '',
       r?.hours ?? '',
       r?.component_type ?? 'regular',
-    ]);
+    ];
+    if (includeVehicleType) {
+      base.push(r?.vehicle_type ?? 'truck');
+    }
+    data.push(base);
   });
 
   const ws = XLSX.utils.aoa_to_sheet(data);
@@ -56,7 +62,8 @@ const makeWorktimesWorkbook = (rows) => {
     ['1) Попълнете/редактирайте редовете в лист "Нормовремена".'],
     ['2) Колоните с * са задължителни.'],
     ['3) Ако има ID, записът ще се обнови. Ако ID е празно, ще се създаде ново нормовреме.'],
-    ['4) Компонент е ключ (пример: regular, cabin, gearbox...).'],
+    ['4) Компонент е ключ (пример: regular, cabin, gearbox...) или подменю код (пример: 21, 30).'],
+    ['5) Тип: truck или trailer (по подразбиране: truck).'],
   ]);
   XLSX.utils.book_append_sheet(wb, instr, 'ИНСТРУКЦИИ');
   return wb;
@@ -64,7 +71,12 @@ const makeWorktimesWorkbook = (rows) => {
 
 // Всички нормовремена
 router.get('/', checkPermission('worktimes', 'read'), (req, res) => {
-    db.all('SELECT * FROM worktimes', [], (err, rows) => {
+    const vt = String(req.query.vehicle_type || '').trim().toLowerCase();
+    const isValidVt = vt === 'truck' || vt === 'trailer';
+    const sql = isValidVt ? 'SELECT * FROM worktimes WHERE vehicle_type = ?' : 'SELECT * FROM worktimes';
+    const params = isValidVt ? [vt] : [];
+
+    db.all(sql, params, (err, rows) => {
         if (err) {
             res.status(500).json({ error: err.message });
             return;
@@ -76,7 +88,7 @@ router.get('/', checkPermission('worktimes', 'read'), (req, res) => {
 // --- XLSX (template/export/import) ---
 router.get('/xlsx/template', checkPermission('worktimes', 'read'), (req, res) => {
   try {
-    const wb = makeWorktimesWorkbook([]);
+    const wb = makeWorktimesWorkbook([], { includeVehicleType: true });
     const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
     res.setHeader('Content-Type', XLSX_MIME);
     res.setHeader('Content-Disposition', 'attachment; filename="worktimes_template.xlsx"');
@@ -88,11 +100,17 @@ router.get('/xlsx/template', checkPermission('worktimes', 'read'), (req, res) =>
 
 router.get('/xlsx/export', checkPermission('worktimes', 'read'), async (req, res) => {
   try {
-    const rows = await allAsync('SELECT * FROM worktimes ORDER BY id ASC');
-    const wb = makeWorktimesWorkbook(rows);
+    const vt = String(req.query.vehicle_type || '').trim().toLowerCase();
+    const isValidVt = vt === 'truck' || vt === 'trailer';
+    const rows = isValidVt
+      ? await allAsync('SELECT * FROM worktimes WHERE vehicle_type = ? ORDER BY id ASC', [vt])
+      : await allAsync('SELECT * FROM worktimes ORDER BY id ASC');
+
+    const wb = makeWorktimesWorkbook(rows, { includeVehicleType: true });
     const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
     res.setHeader('Content-Type', XLSX_MIME);
-    res.setHeader('Content-Disposition', 'attachment; filename="worktimes_export.xlsx"');
+    const fileSuffix = isValidVt ? `_${vt}` : '';
+    res.setHeader('Content-Disposition', `attachment; filename="worktimes_export${fileSuffix}.xlsx"`);
     return res.send(buf);
   } catch (e) {
     return res.status(500).json({ error: e?.message || 'XLSX export failed' });
@@ -113,15 +131,17 @@ router.post('/xlsx/import', checkPermission('worktimes', 'write'), upload.single
 
     const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
     const header = (aoa[0] || []).map((x) => String(x || '').trim());
-    const expected = WORKTIME_HEADERS_BG;
-    const headerOk = expected.every((h, i) => (header[i] || '') === h);
-    if (!headerOk) {
+    const matchesV1 = WORKTIME_HEADERS_BG_V1.every((h, i) => (header[i] || '') === h);
+    const matchesV2 = WORKTIME_HEADERS_BG_V2.every((h, i) => (header[i] || '') === h);
+    if (!matchesV1 && !matchesV2) {
       return res.status(400).json({
         error: 'Невалиден шаблон. Моля използвайте XLSX шаблона от системата.',
-        expectedHeader: expected,
+        expectedHeader: WORKTIME_HEADERS_BG_V2,
         gotHeader: header,
       });
     }
+
+    const hasVehicleTypeCol = matchesV2;
 
     const dataRows = aoa.slice(1).filter((r) => (r || []).some((cell) => String(cell || '').trim() !== ''));
     if (dataRows.length === 0) {
@@ -143,6 +163,10 @@ router.post('/xlsx/import', checkPermission('worktimes', 'write'), upload.single
         const title = normalize(r[1]);
         const hoursRaw = normalize(r[2]);
         const component_type = normalize(r[3]) || 'regular';
+        const vehicle_type = hasVehicleTypeCol ? (normalize(r[4]) || 'truck') : 'truck';
+
+        const vt = String(vehicle_type || '').trim().toLowerCase();
+        const safeVehicleType = vt === 'trailer' ? 'trailer' : 'truck';
 
         const hours = Number(String(hoursRaw).replace(',', '.'));
 
@@ -161,17 +185,23 @@ router.post('/xlsx/import', checkPermission('worktimes', 'write'), upload.single
         if (Number.isFinite(id) && id > 0) {
           const result = await runAsync(
             `UPDATE worktimes
-             SET title = ?, hours = ?, component_type = ?
+             SET title = ?, hours = ?, component_type = ?, vehicle_type = ?
              WHERE id = ?`,
-            [title, hours, component_type, id]
+            [title, hours, component_type, safeVehicleType, id]
           );
           if (result.changes > 0) updated++;
           else {
-            await runAsync('INSERT INTO worktimes (title, hours, component_type) VALUES (?, ?, ?)', [title, hours, component_type]);
+            await runAsync(
+              'INSERT INTO worktimes (title, hours, component_type, vehicle_type) VALUES (?, ?, ?, ?)',
+              [title, hours, component_type, safeVehicleType]
+            );
             inserted++;
           }
         } else {
-          await runAsync('INSERT INTO worktimes (title, hours, component_type) VALUES (?, ?, ?)', [title, hours, component_type]);
+          await runAsync(
+            'INSERT INTO worktimes (title, hours, component_type, vehicle_type) VALUES (?, ?, ?, ?)',
+            [title, hours, component_type, safeVehicleType]
+          );
           inserted++;
         }
       }
@@ -190,11 +220,14 @@ router.post('/xlsx/import', checkPermission('worktimes', 'write'), upload.single
 
 // Създаване на нормовреме
 router.post('/', checkPermission('worktimes', 'write'), (req, res) => {
-    const { title, hours, component_type } = req.body;
+    const { title, hours, component_type, vehicle_type } = req.body;
+
+    const vt = String(vehicle_type || '').trim().toLowerCase();
+    const safeVehicleType = vt === 'trailer' ? 'trailer' : 'truck';
 
     db.run(
-        'INSERT INTO worktimes (title, hours, component_type) VALUES (?, ?, ?)',
-        [title, hours, component_type || 'cabin'],
+        'INSERT INTO worktimes (title, hours, component_type, vehicle_type) VALUES (?, ?, ?, ?)',
+        [title, hours, component_type || 'cabin', safeVehicleType],
         function(err) {
             if (err) {
                 res.status(500).json({ error: err.message });

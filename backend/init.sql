@@ -106,7 +106,8 @@ CREATE TABLE IF NOT EXISTS worktimes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     hours REAL NOT NULL,
-    component_type TEXT DEFAULT 'cabin'
+    component_type TEXT DEFAULT 'cabin',
+    vehicle_type TEXT DEFAULT 'truck' -- 'truck' or 'trailer'
 );
 
 CREATE TABLE IF NOT EXISTS order_worktimes (

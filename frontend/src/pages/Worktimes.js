@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import {
   Container,
@@ -91,9 +91,16 @@ export default function Worktimes({ t }) {
       });
   }, [worktimes, vehicleTypeFilter, activeCategoryKey, activeSubcategoryKey, search]);
 
+  const loadWorktimes = useCallback(async () => {
+    const res = await axios.get(
+      `${getApiBaseUrl()}/worktimes?vehicle_type=${encodeURIComponent(vehicleTypeFilter)}`
+    );
+    setWorktimes(res.data);
+  }, [vehicleTypeFilter]);
+
   useEffect(() => {
     loadWorktimes();
-  }, []);
+  }, [loadWorktimes]);
 
   useEffect(() => {
     // Keep selected category valid when filter changes.
@@ -122,11 +129,6 @@ export default function Worktimes({ t }) {
     }
   }, [vehicleTypeFilter, activeCategoryKey, activeSubcategoryKey]);
 
-  async function loadWorktimes() {
-    const res = await axios.get(`${getApiBaseUrl()}/worktimes`);
-    setWorktimes(res.data);
-  }
-
   async function createWorktime() {
     const componentTypeForSave =
       form.vehicle_type === 'truck'
@@ -137,6 +139,7 @@ export default function Worktimes({ t }) {
       title: form.title,
       hours: form.hours,
       component_type: componentTypeForSave,
+      vehicle_type: form.vehicle_type,
     });
     // Reset but keep selected vehicle type and default category/subcategory.
     const vt = form.vehicle_type;
