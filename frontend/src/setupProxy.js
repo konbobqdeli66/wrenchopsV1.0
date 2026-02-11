@@ -39,7 +39,7 @@ module.exports = function(app) {
   );
 
   app.use(
-    ['/clients', '/orders', '/vehicles', '/worktimes', '/preferences', '/admin'],
+    ['/clients', '/orders', '/vehicles', '/worktimes', '/packages', '/preferences', '/admin'],
     createProxyMiddleware({
       target: backendUrl,
       changeOrigin: true,
