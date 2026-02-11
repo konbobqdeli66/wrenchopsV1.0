@@ -35,7 +35,7 @@ const toBgDate = (sqliteDt) => {
   return `${m[3]}.${m[2]}.${m[1]}`;
 };
 
-function Packages({ t, userRole = 'user', userPermissions = [] }) {
+export default function Packages({ t }) {
   const [packages, setPackages] = useState([]);
   const [itemsPerPage] = useState(50);
   const [search, setSearch] = useState('');
@@ -43,26 +43,10 @@ function Packages({ t, userRole = 'user', userPermissions = [] }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState({ title: '', hours: '' });
 
-  const canReadPackages = useMemo(() => {
-    if (userRole === 'admin') return true;
-    const p = (Array.isArray(userPermissions) ? userPermissions : []).find((x) => x.module === 'packages');
-    return Number(p?.can_access_module) === 1 && Number(p?.can_read) === 1;
-  }, [userRole, userPermissions]);
-
-  const canWritePackages = useMemo(() => {
-    if (userRole === 'admin') return true;
-    const p = (Array.isArray(userPermissions) ? userPermissions : []).find((x) => x.module === 'packages');
-    return Number(p?.can_access_module) === 1 && Number(p?.can_write) === 1;
-  }, [userRole, userPermissions]);
-
   const loadPackages = useCallback(async () => {
-    if (!canReadPackages) {
-      setPackages([]);
-      return;
-    }
     const res = await axios.get(`${getApiBaseUrl()}/packages`);
     setPackages(Array.isArray(res.data) ? res.data : []);
-  }, [canReadPackages]);
+  }, []);
 
   useEffect(() => {
     loadPackages();
@@ -76,10 +60,6 @@ function Packages({ t, userRole = 'user', userPermissions = [] }) {
   }, [packages, search]);
 
   const createPackage = async () => {
-    if (!canWritePackages) {
-      alert('Нямате права за добавяне (packages:write).');
-      return;
-    }
     const title = String(form.title || '').trim();
     const hours = Number(String(form.hours || '').replace(',', '.'));
     if (!title) {
@@ -136,25 +116,12 @@ function Packages({ t, userRole = 'user', userPermissions = [] }) {
                 <Button
                   variant="contained"
                   startIcon={<AddIcon />}
-                  onClick={() => {
-                    if (!canWritePackages) {
-                      alert('Нямате права за добавяне (packages:write).');
-                      return;
-                    }
-                    setCreateOpen(true);
-                  }}
+                  onClick={() => setCreateOpen(true)}
                   sx={{ whiteSpace: 'nowrap' }}
-                  disabled={!canWritePackages}
                 >
                   Нова операция
                 </Button>
               </Box>
-
-              {!canReadPackages ? (
-                <Typography variant="body2" color="error" sx={{ mt: 1, fontWeight: 800 }}>
-                  Нямате достъп до „Пакетни операции“ (packages:read).
-                </Typography>
-              ) : null}
 
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1, fontWeight: 700 }}>
                 Показани: {Math.min(filtered.length, itemsPerPage)} от {filtered.length}
@@ -279,6 +246,4 @@ function Packages({ t, userRole = 'user', userPermissions = [] }) {
     </Container>
   );
 }
-
-export default Packages;
 

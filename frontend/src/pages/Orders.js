@@ -141,16 +141,8 @@ export default function Orders({ t, userRole = 'user', userPermissions = [] }) {
     return Number(p?.can_access_module) === 1 && Number(p?.can_read) === 1;
   };
 
-  const canWriteModule = (moduleKey) => {
-    if (userRole === 'admin') return true;
-    const perms = Array.isArray(userPermissions) ? userPermissions : [];
-    const p = perms.find((x) => x.module === moduleKey);
-    return Number(p?.can_access_module) === 1 && Number(p?.can_write) === 1;
-  };
-
   const canUseWorktimes = canAccessModule('worktimes');
   const canUsePackages = canAccessModule('packages');
-  const canWritePackages = canWriteModule('packages');
 
   // Ensure the currently selected add-mode is always permitted.
   useEffect(() => {
@@ -597,49 +589,6 @@ export default function Orders({ t, userRole = 'user', userPermissions = [] }) {
       alert('Грешка при добавяне на пакетна операция');
     }
   }
-
-  // Create package from inside the package picker modal
-  const [packageCreateOpen, setPackageCreateOpen] = useState(false);
-  const [packageCreateForm, setPackageCreateForm] = useState({ title: '', hours: '' });
-
-  const createNewPackage = async () => {
-    if (!canWritePackages) {
-      alert('Нямате права за добавяне на пакетни операции.');
-      return;
-    }
-    const title = String(packageCreateForm.title || '').trim();
-    const hours = Number(String(packageCreateForm.hours || '').replace(',', '.'));
-    if (!title) {
-      alert('Моля въведете име');
-      return;
-    }
-    if (!Number.isFinite(hours) || hours < 0) {
-      alert('Моля въведете валидни часове');
-      return;
-    }
-
-    try {
-      const res = await axios.post(`${getApiBaseUrl()}/packages`, { title, hours });
-      const created = res?.data;
-      await loadAvailablePackages();
-      setPackageCreateOpen(false);
-      setPackageCreateForm({ title: '', hours: '' });
-
-      // Convenience: if API returns the created package, auto-select it and open the price dialog.
-      if (created?.id) {
-        setSelectedPackageToAdd(created);
-        const defaultUnitPrice = Number(created?.last_invoiced_price) || 0;
-        setPackageForm((prev) => ({
-          ...prev,
-          price: String(defaultUnitPrice.toFixed(2)),
-          is_price_correction: 0,
-        }));
-        setPackagePriceDialogOpen(true);
-      }
-    } catch (error) {
-      alert('Грешка при създаване на пакетна операция');
-    }
-  };
 
   const openOrderPackageDetails = (op) => {
     if (!canUsePackages) return;
@@ -1720,44 +1669,6 @@ export default function Orders({ t, userRole = 'user', userPermissions = [] }) {
             </Grid>
           </Box>
 
-          {/* Create new package directly from this modal */}
-          <Card
-            variant="outlined"
-            sx={{
-              mb: 2,
-              borderRadius: 2,
-              borderStyle: 'dashed',
-              backgroundColor: (theme) => theme.palette.mode === 'dark' ? '#2a2a2a' : '#ffffff',
-            }}
-          >
-            <CardActionArea
-              onClick={() => {
-                if (!canWritePackages) {
-                  alert('Нямате права за добавяне на пакетни операции.');
-                  return;
-                }
-                setPackageCreateOpen(true);
-              }}
-              sx={{ p: 1.5 }}
-              disabled={!canWritePackages}
-            >
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
-                <Box sx={{ minWidth: 0 }}>
-                  <Typography sx={{ fontWeight: 900 }}>+ Нова пакетна операция</Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 700 }}>
-                    Създай операция без да излизаш от работната карта.
-                  </Typography>
-                </Box>
-                <Chip
-                  label={canWritePackages ? 'Създай' : 'Без права'}
-                  color={canWritePackages ? 'primary' : 'default'}
-                  size="small"
-                  sx={{ fontWeight: 900, flexShrink: 0 }}
-                />
-              </Box>
-            </CardActionArea>
-          </Card>
-
           <List sx={{ p: 0 }}>
             {(Array.isArray(availablePackages) ? availablePackages : [])
               .filter((p) => {
@@ -1834,7 +1745,7 @@ export default function Orders({ t, userRole = 'user', userPermissions = [] }) {
               <ListItem>
                 <ListItemText
                   primary="Няма пакетни операции"
-                  secondary={canWritePackages ? 'Създайте първата с „Нова пакетна операция“ по-горе.' : 'Нямате права за създаване (packages:write).'}
+                  secondary="Създайте ги от таб „Пакетни операции“"
                 />
               </ListItem>
             ) : null}
@@ -1843,42 +1754,6 @@ export default function Orders({ t, userRole = 'user', userPermissions = [] }) {
         <DialogActions sx={{ p: 3, pt: 0 }}>
           <Button onClick={() => setPackageSelectionOpen(false)} variant="outlined">
             Отказ
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Create package dialog (from picker) */}
-      <Dialog open={packageCreateOpen} onClose={() => setPackageCreateOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 900, display: 'flex', alignItems: 'center', gap: 1 }}>
-          <AddIcon />
-          Нова пакетна операция
-        </DialogTitle>
-        <DialogContent sx={{ pt: 2 }}>
-          <Grid container spacing={2}>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Име *"
-                value={packageCreateForm.title}
-                onChange={(e) => setPackageCreateForm((p) => ({ ...p, title: e.target.value }))}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Часове *"
-                value={packageCreateForm.hours}
-                onChange={(e) => setPackageCreateForm((p) => ({ ...p, hours: e.target.value }))}
-                type="number"
-                inputProps={{ min: 0, step: '0.1' }}
-              />
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setPackageCreateOpen(false)}>Отказ</Button>
-          <Button onClick={createNewPackage} variant="contained" disabled={!canWritePackages}>
-            Създай
           </Button>
         </DialogActions>
       </Dialog>
