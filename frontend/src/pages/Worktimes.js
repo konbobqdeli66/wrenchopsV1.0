@@ -8,6 +8,7 @@ import {
   Grid,
   Card,
   CardContent,
+  CardActionArea,
   List,
   ListItem,
   ListItemText,
@@ -493,58 +494,97 @@ export default function Worktimes({ t }) {
                 ) : null}
 
                 {navStep === 'category' ? (
-                  <Tabs
-                    value={activeCategoryKey}
-                    onChange={(_, newKey) => {
-                      setActiveCategoryKey(newKey);
-                      if (vehicleTypeFilter === 'trailer') {
-                        setNavStep('worktimes');
-                        return;
-                      }
-                      const firstSub = getSubcategoriesForCategoryKey(vehicleTypeFilter, newKey)[0]?.key || '';
-                      setActiveSubcategoryKey(firstSub);
-                      setNavStep('subcategory');
+                  <Box
+                    sx={{
+                      display: 'grid',
+                      gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: '1fr 1fr 1fr' },
+                      gap: 1,
+                      alignItems: 'stretch',
                     }}
-                    variant="scrollable"
-                    scrollButtons="auto"
-                    allowScrollButtonsMobile
-                    sx={{ minHeight: 42 }}
                   >
                     {categories.map((cat) => {
+                      const isActive = activeCategoryKey === cat.key;
                       const count = countByCategoryKey[cat.key] || 0;
                       return (
-                        <Tab
+                        <Card
                           key={cat.key}
-                          value={cat.key}
-                          label={`${cat.no}. ${cat.label} (${count})`}
-                          sx={{ fontWeight: 900, textTransform: 'none' }}
-                        />
+                          variant="outlined"
+                          sx={(theme) => ({
+                            borderRadius: 2,
+                            borderWidth: isActive ? 2 : 1,
+                            borderColor: isActive ? theme.palette.primary.main : theme.palette.divider,
+                            overflow: 'hidden',
+                          })}
+                        >
+                          <CardActionArea
+                            onClick={() => {
+                              setActiveCategoryKey(cat.key);
+                              if (vehicleTypeFilter === 'trailer') {
+                                setNavStep('worktimes');
+                                return;
+                              }
+                              const firstSub = getSubcategoriesForCategoryKey(vehicleTypeFilter, cat.key)[0]?.key || '';
+                              setActiveSubcategoryKey(firstSub);
+                              setNavStep('subcategory');
+                            }}
+                            sx={{ p: 1.25 }}
+                          >
+                            <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 1 }}>
+                              <Box sx={{ minWidth: 0 }}>
+                                <Typography sx={{ fontWeight: 900 }}>{cat.no}. {cat.label}</Typography>
+                                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
+                                  {vehicleTypeFilter === 'trailer' ? 'Група' : 'Главна група'}
+                                </Typography>
+                              </Box>
+                              <Chip label={count} size="small" sx={{ fontWeight: 900 }} />
+                            </Box>
+                          </CardActionArea>
+                        </Card>
                       );
                     })}
-                  </Tabs>
+                  </Box>
                 ) : null}
 
                 {navStep === 'subcategory' && vehicleTypeFilter !== 'trailer' ? (
-                  <Tabs
-                    value={activeSubcategoryKey}
-                    onChange={(_, newSubKey) => {
-                      setActiveSubcategoryKey(newSubKey);
-                      setNavStep('worktimes');
+                  <Box
+                    sx={{
+                      display: 'grid',
+                      gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+                      gap: 1,
+                      alignItems: 'stretch',
                     }}
-                    variant="scrollable"
-                    scrollButtons="auto"
-                    allowScrollButtonsMobile
-                    sx={{ minHeight: 42 }}
                   >
-                    {subcategoriesWithLegacy.map((sub) => (
-                      <Tab
-                        key={sub.key}
-                        value={sub.key}
-                        label={sub.key === '__legacy__' ? String(sub.label) : `${sub.no}. ${sub.label}`}
-                        sx={{ fontWeight: 900, textTransform: 'none' }}
-                      />
-                    ))}
-                  </Tabs>
+                    {subcategoriesWithLegacy.map((sub) => {
+                      const isActive = activeSubcategoryKey === sub.key;
+                      return (
+                        <Card
+                          key={sub.key}
+                          variant="outlined"
+                          sx={(theme) => ({
+                            borderRadius: 2,
+                            borderWidth: isActive ? 2 : 1,
+                            borderColor: isActive ? theme.palette.primary.main : theme.palette.divider,
+                            overflow: 'hidden',
+                          })}
+                        >
+                          <CardActionArea
+                            onClick={() => {
+                              setActiveSubcategoryKey(sub.key);
+                              setNavStep('worktimes');
+                            }}
+                            sx={{ p: 1.25 }}
+                          >
+                            <Typography sx={{ fontWeight: 900 }} title={sub.label}>
+                              {sub.key === '__legacy__' ? String(sub.label) : `${sub.no}. ${sub.label}`}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
+                              Подгрупа
+                            </Typography>
+                          </CardActionArea>
+                        </Card>
+                      );
+                    })}
+                  </Box>
                 ) : null}
 
                 {navStep === 'worktimes' ? (

@@ -26,6 +26,8 @@ import ArrowRightIcon from "@mui/icons-material/ArrowRight";
 
 import { decodeJwtPayload } from "./utils/jwt";
 
+import { APP_VERSION_LABEL } from "./buildInfo";
+
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import ForgotPassword from "./pages/ForgotPassword";
@@ -1094,6 +1096,62 @@ function MainApp() {
           {page === 5 && <Invoices t={t} canDeleteInvoices={canDeleteInvoices} />}
           {page === 6 && userRole === 'admin' && <Admin t={t} />}
         </Container>
+
+        {/* App footer: version (left) + logged-in user (right) */}
+        <Box
+          sx={{
+            position: 'fixed',
+            left: 10,
+            right: 10,
+            bottom: isMobile ? 74 : 10,
+            zIndex: (theme) => theme.zIndex.appBar,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            pointerEvents: 'none',
+          }}
+        >
+          <Typography
+            variant="caption"
+            sx={{
+              pointerEvents: 'none',
+              fontWeight: 800,
+              opacity: 0.75,
+              bgcolor: (theme) => theme.palette.background.paper,
+              border: (theme) => `1px solid ${theme.palette.divider}`,
+              px: 1,
+              py: 0.35,
+              borderRadius: 2,
+              maxWidth: '70vw',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+            title={APP_VERSION_LABEL}
+          >
+            {APP_VERSION_LABEL}
+          </Typography>
+          <Typography
+            variant="caption"
+            sx={{
+              pointerEvents: 'none',
+              fontWeight: 900,
+              opacity: 0.75,
+              bgcolor: (theme) => theme.palette.background.paper,
+              border: (theme) => `1px solid ${theme.palette.divider}`,
+              px: 1,
+              py: 0.35,
+              borderRadius: 2,
+              maxWidth: '45vw',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+            title={userNickname || (userRole === 'admin' ? 'Admin' : 'User')}
+          >
+            {userNickname || (userRole === 'admin' ? 'Admin' : 'User')}
+          </Typography>
+        </Box>
 
             {/* Bottom navigation removed (replaced by single Home button menu on mobile). */}
           </Box>

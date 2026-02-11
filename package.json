@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "install:all": "npm --prefix backend install && npm --prefix frontend install",
-    "build:frontend": "npm --prefix frontend run build",
+    "build:frontend": "node scripts/write-build-info.js && npm --prefix frontend run build",
     "start:backend": "npm --prefix backend run start",
     "start:backend:prod": "npm --prefix backend run start:prod"
   },
