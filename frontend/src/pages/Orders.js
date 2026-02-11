@@ -41,6 +41,7 @@ import EditIcon from "@mui/icons-material/Edit";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
 import StickyNote2Icon from "@mui/icons-material/StickyNote2";
+import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import { getApiBaseUrl } from "../api";
 import {
   formatCategoryLabel,
@@ -92,6 +93,7 @@ export default function Orders({ t }) {
   const [notesText, setNotesText] = useState("");
   const [worktimeDetailsOpen, setWorktimeDetailsOpen] = useState(false);
   const [selectedOrderWorktime, setSelectedOrderWorktime] = useState(null);
+  const [worktimeInfoOpen, setWorktimeInfoOpen] = useState(false);
   const [completeConfirmOpen, setCompleteConfirmOpen] = useState(false);
   const [completeLoading, setCompleteLoading] = useState(false);
 
@@ -1411,6 +1413,34 @@ export default function Orders({ t }) {
           {/* Step 3: Worktimes */}
           {worktimeNavStep === 'worktimes' ? (
           <Box sx={{ p: 3 }}>
+            {/* Info tile: how worktimes are calculated */}
+            <Card
+              variant="outlined"
+              sx={{
+                mb: 2,
+                borderRadius: 2,
+                borderStyle: 'dashed',
+                backgroundColor: (theme) => theme.palette.mode === 'dark' ? '#2a2a2a' : '#ffffff',
+              }}
+            >
+              <CardActionArea onClick={() => setWorktimeInfoOpen(true)} sx={{ p: 1.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
+                    <InfoOutlinedIcon color="info" />
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography sx={{ fontWeight: 900 }}>
+                        Как се изчислява нормовремето?
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 700 }}>
+                        Натисни за кратко обяснение и пример.
+                      </Typography>
+                    </Box>
+                  </Box>
+                  <Chip label="Инфо" color="info" size="small" sx={{ fontWeight: 900, flexShrink: 0 }} />
+                </Box>
+              </CardActionArea>
+            </Card>
+
             {/* Mobile Tab Indicator */}
             <Box sx={{ display: { xs: 'block', sm: 'none' }, mb: 2 }}>
               <Typography variant="h6" sx={{ color: 'primary.main', fontWeight: 'bold' }}>
@@ -1666,6 +1696,65 @@ export default function Orders({ t }) {
             }}
           >
             Отказ
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Worktime info popup */}
+      <Dialog
+        open={worktimeInfoOpen}
+        onClose={() => setWorktimeInfoOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, fontWeight: 900 }}>
+          <InfoOutlinedIcon color="info" />
+          Информация за нормовремената
+        </DialogTitle>
+        <DialogContent sx={{ pt: 2 }}>
+          <Typography sx={{ fontWeight: 800, mb: 1.25 }}>
+            Какво е „нормовреме“?
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 700, mb: 2 }}>
+            Нормовремето е стандартно време (в часове) за изпълнение на конкретна дейност.
+            Използва се за изчисляване на общото време по работната карта.
+          </Typography>
+
+          <Divider sx={{ my: 1.5 }} />
+
+          <Typography sx={{ fontWeight: 800, mb: 1 }}>
+            Как се изчислява общото време?
+          </Typography>
+          <Box component="ul" sx={{ m: 0, pl: 2.25 }}>
+            <li>
+              <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                Време за позиция = <strong>часове (нормовреме)</strong> × <strong>количество</strong>
+              </Typography>
+            </li>
+            <li>
+              <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                Общо време по поръчката = сума от времената за всички позиции
+              </Typography>
+            </li>
+          </Box>
+
+          <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 700, mt: 1.25 }}>
+            Пример: 1.5ч × 2 = 3.0ч общо за позицията.
+          </Typography>
+
+          <Divider sx={{ my: 1.5 }} />
+
+          <Typography sx={{ fontWeight: 800, mb: 1 }}>
+            Бележки и групиране
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 700 }}>
+            Ако добавиш бележка към позиция, тя служи като допълнителна информация за изпълнението.
+            (Позициите с различни бележки се третират като отделни редове.)
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setWorktimeInfoOpen(false)} variant="contained">
+            Разбрах
           </Button>
         </DialogActions>
       </Dialog>
