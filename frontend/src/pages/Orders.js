@@ -45,7 +45,9 @@ import { getApiBaseUrl } from "../api";
 import {
   formatCategoryLabel,
   getCategoriesForVehicleType,
+  getSubcategoriesForCategoryKey,
   getWorktimeCategoryKey,
+  getWorktimeSubcategoryKey,
 } from "../utils/worktimeClassification";
 
 export default function Orders({ t }) {
@@ -66,6 +68,7 @@ export default function Orders({ t }) {
   const [worktimeSelectionOpen, setWorktimeSelectionOpen] = useState(false);
   const [orderVehicleType, setOrderVehicleType] = useState('truck');
   const [worktimeCategoryKey, setWorktimeCategoryKey] = useState('regular');
+  const [worktimeSubcategoryKey, setWorktimeSubcategoryKey] = useState('');
   const [worktimeSearch, setWorktimeSearch] = useState("");
   const [worktimeForm, setWorktimeForm] = useState({
     worktime_id: "",
@@ -76,7 +79,10 @@ export default function Orders({ t }) {
   const [newWorktimeForm, setNewWorktimeForm] = useState({
     title: "",
     hours: "",
-    component_type: "regular"
+    // Main category key (e.g. "engine")
+    component_type: "regular",
+    // Truck-only numeric subgroup key (e.g. "21")
+    subcomponent_type: "",
   });
   const [notesDialogOpen, setNotesDialogOpen] = useState(false);
   const [editingWorktime, setEditingWorktime] = useState(null);
@@ -127,6 +133,48 @@ export default function Orders({ t }) {
   const pageColumnSx = { width: '100%' };
 
   const selectionCategories = getCategoriesForVehicleType(orderVehicleType);
+
+  const selectionSubcategories = useMemo(() => {
+    if (orderVehicleType === 'trailer') return [];
+    return getSubcategoriesForCategoryKey(orderVehicleType, worktimeCategoryKey);
+  }, [orderVehicleType, worktimeCategoryKey]);
+
+  const hasLegacyWorktimesInSelectedCategory = useMemo(() => {
+    if (orderVehicleType === 'trailer') return false;
+    return (availableWorktimes || []).some((w) => {
+      if (getWorktimeCategoryKey(w, orderVehicleType) !== worktimeCategoryKey) return false;
+      return !getWorktimeSubcategoryKey(w, orderVehicleType);
+    });
+  }, [availableWorktimes, orderVehicleType, worktimeCategoryKey]);
+
+  const selectionSubcategoriesWithLegacy = useMemo(() => {
+    if (orderVehicleType === 'trailer') return [];
+    const base = Array.isArray(selectionSubcategories) ? selectionSubcategories : [];
+    if (!hasLegacyWorktimesInSelectedCategory) return base;
+    return [...base, { key: '__legacy__', no: '—', label: 'Неразпределени (стар тип)' }];
+  }, [orderVehicleType, selectionSubcategories, hasLegacyWorktimesInSelectedCategory]);
+
+  const filteredAvailableWorktimes = useMemo(() => {
+    const q = String(worktimeSearch || '').trim().toLowerCase();
+    const list = Array.isArray(availableWorktimes) ? availableWorktimes : [];
+    return list
+      .filter((w) => getWorktimeCategoryKey(w, orderVehicleType) === worktimeCategoryKey)
+      .filter((w) => {
+        if (orderVehicleType === 'trailer') return true;
+        if (!selectionSubcategoriesWithLegacy.length) return true;
+
+        // Enforce: Main Group -> Subgroup -> Worktime
+        if (!worktimeSubcategoryKey) return false;
+        const subKey = getWorktimeSubcategoryKey(w, orderVehicleType);
+        if (worktimeSubcategoryKey === '__legacy__') return !subKey;
+        return subKey === worktimeSubcategoryKey;
+      })
+      .filter((w) => {
+        if (!q) return true;
+        const catLabel = formatCategoryLabel(orderVehicleType, w.component_type);
+        return `${w.title} ${w.component_type} ${catLabel}`.toLowerCase().includes(q);
+      });
+  }, [availableWorktimes, orderVehicleType, worktimeCategoryKey, worktimeSubcategoryKey, worktimeSearch, selectionSubcategoriesWithLegacy.length]);
 
   useEffect(() => {
     loadOrders();
@@ -270,6 +318,12 @@ export default function Orders({ t }) {
     setOrderVehicleType(vt);
     const firstKey = getCategoriesForVehicleType(vt)[0]?.key || 'regular';
     setWorktimeCategoryKey(firstKey);
+
+    // Default to the first subgroup when the vehicle is a truck.
+    const firstSubKey =
+      vt === 'trailer' ? '' : (getSubcategoriesForCategoryKey(vt, firstKey)[0]?.key || '');
+    setWorktimeSubcategoryKey(firstSubKey);
+
     loadOrderWorktimes(order.id);
     loadAvailableWorktimes();
     setOrderDetailsOpen(true);
@@ -303,6 +357,30 @@ export default function Orders({ t }) {
       setAvailableWorktimes([]);
     }
   }
+
+  // Keep the selected subgroup valid when category/vehicle type changes.
+  useEffect(() => {
+    if (orderVehicleType === 'trailer') {
+      if (worktimeSubcategoryKey) setWorktimeSubcategoryKey('');
+      return;
+    }
+
+    const list = getSubcategoriesForCategoryKey(orderVehicleType, worktimeCategoryKey);
+    const keys = new Set(list.map((s) => s.key));
+    const firstSub = list[0]?.key || '';
+
+    // Force a subgroup selection when subgroups exist.
+    if (!worktimeSubcategoryKey) {
+      if (firstSub) setWorktimeSubcategoryKey(firstSub);
+      return;
+    }
+
+    if (worktimeSubcategoryKey === '__legacy__') return;
+
+    if (!keys.has(worktimeSubcategoryKey)) {
+      setWorktimeSubcategoryKey(firstSub);
+    }
+  }, [orderVehicleType, worktimeCategoryKey, worktimeSubcategoryKey]);
 
   async function loadOrderWorktimes(orderId) {
     try {
@@ -349,8 +427,18 @@ export default function Orders({ t }) {
       return;
     }
 
+    const componentTypeForSave =
+      orderVehicleType === 'trailer'
+        ? newWorktimeForm.component_type
+        : (String(newWorktimeForm.subcomponent_type || '').trim() || newWorktimeForm.component_type);
+
     try {
-      const response = await axios.post(`${getApiBaseUrl()}/worktimes`, newWorktimeForm);
+      const response = await axios.post(`${getApiBaseUrl()}/worktimes`, {
+        title: newWorktimeForm.title,
+        hours: newWorktimeForm.hours,
+        component_type: componentTypeForSave,
+        vehicle_type: orderVehicleType,
+      });
       // Reload worktimes to include the new one
       await loadAvailableWorktimes();
       // Auto-select the newly created worktime
@@ -363,7 +451,8 @@ export default function Orders({ t }) {
       setNewWorktimeForm({
         title: "",
         hours: "",
-        component_type: worktimeCategoryKey || getCategoriesForVehicleType(orderVehicleType)[0]?.key || 'regular'
+        component_type: worktimeCategoryKey || getCategoriesForVehicleType(orderVehicleType)[0]?.key || 'regular',
+        subcomponent_type: worktimeSubcategoryKey || (getSubcategoriesForCategoryKey(orderVehicleType, worktimeCategoryKey)[0]?.key || ''),
       });
     } catch (error) {
       alert('Грешка при създаване на нормовреме');
@@ -1167,7 +1256,15 @@ export default function Orders({ t }) {
                   <Button
                     key={cat.key}
                     variant={selected ? 'contained' : 'outlined'}
-                    onClick={() => setWorktimeCategoryKey(cat.key)}
+                    onClick={() => {
+                      setWorktimeCategoryKey(cat.key);
+                      if (orderVehicleType !== 'trailer') {
+                        const firstSub = getSubcategoriesForCategoryKey(orderVehicleType, cat.key)[0]?.key || '';
+                        setWorktimeSubcategoryKey(firstSub);
+                      } else {
+                        setWorktimeSubcategoryKey('');
+                      }
+                    }}
                     sx={{
                       justifyContent: 'space-between',
                       textAlign: 'left',
@@ -1194,11 +1291,63 @@ export default function Orders({ t }) {
               })}
             </Box>
           </Box>
+          {/* Subgroup list (trucks only) */}
+          {orderVehicleType !== 'trailer' && selectionSubcategoriesWithLegacy.length > 0 ? (
+            <Box sx={{ px: 3, pt: 2 }}>
+              <Typography sx={{ fontWeight: 800, mb: 1 }}>
+                Подгрупа
+              </Typography>
+              <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
+                <List dense sx={{ p: 0 }}>
+                  {selectionSubcategoriesWithLegacy.map((sub, idx) => {
+                    const selected = worktimeSubcategoryKey === sub.key;
+                    return (
+                      <div key={sub.key}>
+                        <ListItem
+                          disablePadding
+                          selected={selected}
+                          onClick={() => setWorktimeSubcategoryKey(sub.key)}
+                          sx={{ cursor: 'pointer' }}
+                        >
+                          <ListItemText
+                            primary={
+                              sub.key === '__legacy__'
+                                ? String(sub.label)
+                                : `${sub.no}. ${sub.label}`
+                            }
+                            primaryTypographyProps={{
+                              sx: {
+                                fontWeight: 800,
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                              },
+                            }}
+                            sx={{ px: 1.5, py: 0.75 }}
+                          />
+                          <Box sx={{ pr: 1.25, color: 'text.secondary', fontWeight: 900 }}>
+                            »
+                          </Box>
+                        </ListItem>
+                        {idx < selectionSubcategoriesWithLegacy.length - 1 ? <Divider /> : null}
+                      </div>
+                    );
+                  })}
+                </List>
+              </Paper>
+            </Box>
+          ) : null}
+
           <Box sx={{ p: 3 }}>
             {/* Mobile Tab Indicator */}
             <Box sx={{ display: { xs: 'block', sm: 'none' }, mb: 2 }}>
               <Typography variant="h6" sx={{ color: 'primary.main', fontWeight: 'bold' }}>
                 📋 {formatCategoryLabel(orderVehicleType, worktimeCategoryKey)}
+                {orderVehicleType !== 'trailer' && worktimeSubcategoryKey ? (
+                  <>
+                    {' '} / {worktimeSubcategoryKey === '__legacy__' ? 'Неразпределени' : worktimeSubcategoryKey}
+                  </>
+                ) : null}
               </Typography>
             </Box>
 
@@ -1303,15 +1452,8 @@ export default function Orders({ t }) {
             </Box>
 
             <List sx={{ p: 0 }}>
-              {availableWorktimes
-                .filter(w =>
-                  getWorktimeCategoryKey(w, orderVehicleType) === worktimeCategoryKey &&
-                  (worktimeSearch === '' ||
-                   w.title.toLowerCase().includes(worktimeSearch.toLowerCase()) ||
-                   String(w.component_type || '').toLowerCase().includes(worktimeSearch.toLowerCase()))
-                )
-                .map((worktime, index) => (
-                  <div key={worktime.id}>
+              {filteredAvailableWorktimes.map((worktime, index) => (
+                <div key={worktime.id}>
                     <ListItem
                       alignItems="flex-start"
                       button
@@ -1396,11 +1538,7 @@ export default function Orders({ t }) {
                         }
                       />
                     </ListItem>
-                    {index <
-                      availableWorktimes.filter(
-                        (w) => getWorktimeCategoryKey(w, orderVehicleType) === worktimeCategoryKey
-                      ).length -
-                        1 && (
+                    {index < filteredAvailableWorktimes.length - 1 && (
                       <Divider sx={{
                         borderColor: (theme) => theme.palette.mode === 'dark' ? '#555' : '#ddd',
                         my: 1
@@ -1408,9 +1546,8 @@ export default function Orders({ t }) {
                     )}
                   </div>
                 ))}
-              {availableWorktimes.filter(
-                (w) => getWorktimeCategoryKey(w, orderVehicleType) === worktimeCategoryKey
-              ).length === 0 && (
+
+              {filteredAvailableWorktimes.length === 0 && (
                 <ListItem sx={{
                   border: (theme) => `2px dashed ${theme.palette.mode === 'dark' ? '#666' : '#ccc'}`,
                   borderRadius: 2,
@@ -1421,7 +1558,7 @@ export default function Orders({ t }) {
                   <ListItemText
                     primary={
                       <Typography variant="h6" sx={{ color: 'text.secondary', fontWeight: 'bold' }}>
-                        📭 Няма нормовремена за тази категория
+                        📭 Няма нормовремена за избраната подгрупа
                       </Typography>
                     }
                     secondary={
@@ -1473,7 +1610,18 @@ export default function Orders({ t }) {
                 <InputLabel>Категория *</InputLabel>
                 <Select
                   value={newWorktimeForm.component_type}
-                  onChange={(e) => setNewWorktimeForm({ ...newWorktimeForm, component_type: e.target.value })}
+                  onChange={(e) => {
+                    const catKey = e.target.value;
+                    const firstSub =
+                      orderVehicleType === 'trailer'
+                        ? ''
+                        : (getSubcategoriesForCategoryKey(orderVehicleType, catKey)[0]?.key || '');
+                    setNewWorktimeForm({
+                      ...newWorktimeForm,
+                      component_type: catKey,
+                      subcomponent_type: firstSub,
+                    });
+                  }}
                   label="Категория *"
                   required
                 >
@@ -1488,6 +1636,25 @@ export default function Orders({ t }) {
                 </Select>
               </FormControl>
             </Grid>
+
+            {orderVehicleType !== 'trailer' ? (
+              <Grid item xs={12}>
+                <FormControl fullWidth variant="outlined">
+                  <InputLabel>Подгрупа</InputLabel>
+                  <Select
+                    value={newWorktimeForm.subcomponent_type}
+                    onChange={(e) => setNewWorktimeForm({ ...newWorktimeForm, subcomponent_type: e.target.value })}
+                    label="Подгрупа"
+                  >
+                    {getSubcategoriesForCategoryKey(orderVehicleType, newWorktimeForm.component_type).map((sub) => (
+                      <MenuItem key={sub.key} value={sub.key}>
+                        {sub.no}. {sub.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+            ) : null}
             <Grid item xs={12}>
               <TextField
                 fullWidth

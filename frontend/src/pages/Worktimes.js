@@ -66,6 +66,25 @@ export default function Worktimes({ t }) {
     [vehicleTypeFilter, activeCategoryKey]
   );
 
+  const hasLegacyWorktimesInActiveCategory = useMemo(() => {
+    if (vehicleTypeFilter === 'trailer') return false;
+    return (worktimes || []).some((w) => {
+      if (getWorktimeCategoryKey(w, vehicleTypeFilter) !== activeCategoryKey) return false;
+      // Legacy / non-numeric component_type values have no subcategory key.
+      return !getWorktimeSubcategoryKey(w, vehicleTypeFilter);
+    });
+  }, [worktimes, vehicleTypeFilter, activeCategoryKey]);
+
+  const subcategoriesWithLegacy = useMemo(() => {
+    if (vehicleTypeFilter === 'trailer') return [];
+    const base = Array.isArray(subcategories) ? subcategories : [];
+    if (!hasLegacyWorktimesInActiveCategory) return base;
+    return [
+      ...base,
+      { key: '__legacy__', no: '—', label: 'Неразпределени (стар тип)' },
+    ];
+  }, [vehicleTypeFilter, subcategories, hasLegacyWorktimesInActiveCategory]);
+
   const countByCategoryKey = useMemo(() => {
     const map = {};
     (worktimes || []).forEach((w) => {
@@ -80,16 +99,22 @@ export default function Worktimes({ t }) {
     return (worktimes || [])
       .filter((w) => getWorktimeCategoryKey(w, vehicleTypeFilter) === activeCategoryKey)
       .filter((w) => {
-        // Subcategory only applies to trucks. If no subcategory is selected -> show all.
+        // Subcategory applies only to trucks.
         if (vehicleTypeFilter === 'trailer') return true;
-        if (!activeSubcategoryKey) return true;
-        return getWorktimeSubcategoryKey(w, vehicleTypeFilter) === activeSubcategoryKey;
+        if (!subcategoriesWithLegacy.length) return true;
+
+        // Enforce the hierarchy: Category -> Subcategory -> Worktime.
+        // If a subcategory exists, show only worktimes for the selected subcategory.
+        if (!activeSubcategoryKey) return false;
+        const subKey = getWorktimeSubcategoryKey(w, vehicleTypeFilter);
+        if (activeSubcategoryKey === '__legacy__') return !subKey;
+        return subKey === activeSubcategoryKey;
       })
       .filter((w) => {
         if (!q) return true;
         return String(w?.title || '').toLowerCase().includes(q);
       });
-  }, [worktimes, vehicleTypeFilter, activeCategoryKey, activeSubcategoryKey, search]);
+  }, [worktimes, vehicleTypeFilter, activeCategoryKey, activeSubcategoryKey, search, subcategoriesWithLegacy.length]);
 
   const loadWorktimes = useCallback(async () => {
     const res = await axios.get(
@@ -112,8 +137,12 @@ export default function Worktimes({ t }) {
     // Reset subcategory when switching vehicle type.
     if (vehicleTypeFilter === 'trailer') {
       setActiveSubcategoryKey('');
+    } else {
+      // Trucks: default to the first subcategory for the active category.
+      const firstSub = getSubcategoriesForCategoryKey(vehicleTypeFilter, activeCategoryKey)[0]?.key || '';
+      if (firstSub && !activeSubcategoryKey) setActiveSubcategoryKey(firstSub);
     }
-  }, [vehicleTypeFilter, activeCategoryKey]);
+  }, [vehicleTypeFilter, activeCategoryKey, activeSubcategoryKey]);
 
   useEffect(() => {
     // Keep selected subcategory valid when category changes.
@@ -124,8 +153,20 @@ export default function Worktimes({ t }) {
 
     const list = getSubcategoriesForCategoryKey(vehicleTypeFilter, activeCategoryKey);
     const keys = new Set(list.map((s) => s.key));
-    if (activeSubcategoryKey && !keys.has(activeSubcategoryKey)) {
-      setActiveSubcategoryKey('');
+
+    // Always force a valid subcategory when subcategories exist.
+    // This makes the navigation strictly: Main Group -> Subgroup -> Worktimes.
+    const firstSub = list[0]?.key || '';
+    if (!activeSubcategoryKey) {
+      if (firstSub) setActiveSubcategoryKey(firstSub);
+      return;
+    }
+
+    // Accept legacy group as a valid subcategory selector.
+    if (activeSubcategoryKey === '__legacy__') return;
+
+    if (!keys.has(activeSubcategoryKey)) {
+      setActiveSubcategoryKey(firstSub);
     }
   }, [vehicleTypeFilter, activeCategoryKey, activeSubcategoryKey]);
 
@@ -478,13 +519,18 @@ export default function Worktimes({ t }) {
                     };
 
                     return (
-                      <ButtonBase
-                        key={cat.key}
-                        onClick={() => {
-                          setActiveCategoryKey(cat.key);
-                          // Reset subcategory when category changes.
-                          setActiveSubcategoryKey('');
-                        }}
+                        <ButtonBase
+                          key={cat.key}
+                          onClick={() => {
+                            setActiveCategoryKey(cat.key);
+                            // Default to the first subcategory when switching categories (trucks only).
+                            if (vehicleTypeFilter !== 'trailer') {
+                              const firstSub = getSubcategoriesForCategoryKey(vehicleTypeFilter, cat.key)[0]?.key || '';
+                              setActiveSubcategoryKey(firstSub);
+                            } else {
+                              setActiveSubcategoryKey('');
+                            }
+                          }}
                         sx={(theme) => ({
                           width: '100%',
                           textAlign: 'left',
@@ -563,7 +609,7 @@ export default function Worktimes({ t }) {
               </Box>
 
               {/* Truck subcategory list (screenshot-style list with chevron) */}
-              {vehicleTypeFilter !== 'trailer' && subcategories.length > 0 ? (
+              {vehicleTypeFilter !== 'trailer' && subcategoriesWithLegacy.length > 0 ? (
                 <Box sx={{ mt: 1.25 }}>
                   <Paper
                     variant="outlined"
@@ -573,22 +619,7 @@ export default function Worktimes({ t }) {
                     }}
                   >
                     <List dense sx={{ p: 0 }}>
-                      {/* "All" row */}
-                      <ListItem
-                        disablePadding
-                        selected={!activeSubcategoryKey}
-                        onClick={() => setActiveSubcategoryKey('')}
-                        sx={{ cursor: 'pointer' }}
-                      >
-                        <ListItemText
-                          primary={t('all')}
-                          primaryTypographyProps={{ sx: { fontWeight: 900 } }}
-                          sx={{ px: 1.5, py: 0.75 }}
-                        />
-                      </ListItem>
-                      <Divider />
-
-                      {subcategories.map((sub, idx) => {
+                      {subcategoriesWithLegacy.map((sub, idx) => {
                         const isSelected = activeSubcategoryKey === sub.key;
                         return (
                           <div key={sub.key}>
@@ -599,7 +630,11 @@ export default function Worktimes({ t }) {
                               sx={{ cursor: 'pointer' }}
                             >
                               <ListItemText
-                                primary={`${sub.no}. ${sub.label}`}
+                                primary={
+                                  sub.key === '__legacy__'
+                                    ? String(sub.label)
+                                    : `${sub.no}. ${sub.label}`
+                                }
                                 primaryTypographyProps={{
                                   sx: {
                                     fontWeight: 800,
@@ -615,7 +650,7 @@ export default function Worktimes({ t }) {
                                 »
                               </Box>
                             </ListItem>
-                            {idx < subcategories.length - 1 ? <Divider /> : null}
+                            {idx < subcategoriesWithLegacy.length - 1 ? <Divider /> : null}
                           </div>
                         );
                       })}
