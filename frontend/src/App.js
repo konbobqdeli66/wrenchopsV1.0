@@ -1122,12 +1122,12 @@ function MainApp() {
           {page === 6 && userRole === 'admin' && <Admin t={t} />}
         </Container>
 
-        {/* App footer: version bottom-left (desktop only) */}
+        {/* App footer: version bottom-right (desktop only) */}
         {!isMobile && (
           <Box
             sx={{
               position: 'fixed',
-              left: 10,
+              right: 10,
               bottom: 10,
               zIndex: (theme) => theme.zIndex.drawer - 1,
               pointerEvents: 'none',
