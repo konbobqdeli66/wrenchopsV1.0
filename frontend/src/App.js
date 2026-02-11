@@ -758,26 +758,6 @@ function MainApp() {
 
               <Box sx={{ flexGrow: 1 }} />
 
-              {/* Version label (top bar, desktop) */}
-              <Chip
-                size="small"
-                label={APP_VERSION_LABEL}
-                variant="outlined"
-                sx={{
-                  bgcolor: darkMode ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.35)',
-                  color: darkMode ? 'common.white' : 'common.black',
-                  fontWeight: 800,
-                  mr: 1,
-                  maxWidth: 380,
-                  '& .MuiChip-label': {
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  },
-                }}
-                title={APP_VERSION_LABEL}
-              />
-
               <Chip
                 size="small"
                 label={userNickname ? userNickname : (userRole === 'admin' ? 'Admin' : 'User')}
@@ -896,26 +876,30 @@ function MainApp() {
             horizontal: 'right',
           }}
         >
-          {/* Version (always visible in settings menu) */}
-          <MenuItem disabled>
-            <ListItemIcon>
-              <BuildIcon />
-            </ListItemIcon>
-            <ListItemText
-              primary={APP_VERSION_LABEL}
-              primaryTypographyProps={{
-                sx: {
-                  fontWeight: 900,
-                  maxWidth: 340,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                },
-                title: APP_VERSION_LABEL,
-              }}
-            />
-          </MenuItem>
-          <Divider />
+          {/* Version: visible on phones inside Settings menu */}
+          {isMobile && (
+            <>
+              <MenuItem disabled>
+                <ListItemIcon>
+                  <BuildIcon />
+                </ListItemIcon>
+                <ListItemText
+                  primary={APP_VERSION_LABEL}
+                  primaryTypographyProps={{
+                    sx: {
+                      fontWeight: 900,
+                      maxWidth: 340,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    },
+                    title: APP_VERSION_LABEL,
+                  }}
+                />
+              </MenuItem>
+              <Divider />
+            </>
+          )}
 
           {/* MOBILE: allow switching tabs from the Settings dropdown as well */}
           {isMobile && (
@@ -1138,61 +1122,39 @@ function MainApp() {
           {page === 6 && userRole === 'admin' && <Admin t={t} />}
         </Container>
 
-        {/* App footer: version (left) + logged-in user (right) */}
-        <Box
-          sx={{
-            position: 'fixed',
-            left: 10,
-            right: 10,
-            bottom: isMobile ? 74 : 10,
-            zIndex: (theme) => theme.zIndex.appBar + 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            pointerEvents: 'none',
-          }}
-        >
-          <Typography
-            variant="caption"
+        {/* App footer: version bottom-left (desktop only) */}
+        {!isMobile && (
+          <Box
             sx={{
+              position: 'fixed',
+              left: 10,
+              bottom: 10,
+              zIndex: (theme) => theme.zIndex.drawer - 1,
               pointerEvents: 'none',
-              fontWeight: 800,
-              opacity: 0.75,
-              bgcolor: (theme) => theme.palette.background.paper,
-              border: (theme) => `1px solid ${theme.palette.divider}`,
-              px: 1,
-              py: 0.35,
-              borderRadius: 2,
-              maxWidth: '70vw',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
             }}
-            title={APP_VERSION_LABEL}
           >
-            {APP_VERSION_LABEL}
-          </Typography>
-          <Typography
-            variant="caption"
-            sx={{
-              pointerEvents: 'none',
-              fontWeight: 900,
-              opacity: 0.75,
-              bgcolor: (theme) => theme.palette.background.paper,
-              border: (theme) => `1px solid ${theme.palette.divider}`,
-              px: 1,
-              py: 0.35,
-              borderRadius: 2,
-              maxWidth: '45vw',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-            title={userNickname || (userRole === 'admin' ? 'Admin' : 'User')}
-          >
-            {userNickname || (userRole === 'admin' ? 'Admin' : 'User')}
-          </Typography>
-        </Box>
+            <Typography
+              variant="caption"
+              sx={{
+                pointerEvents: 'none',
+                fontWeight: 800,
+                opacity: 0.85,
+                bgcolor: (theme) => theme.palette.background.paper,
+                border: (theme) => `1px solid ${theme.palette.divider}`,
+                px: 1,
+                py: 0.35,
+                borderRadius: 2,
+                maxWidth: 520,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={APP_VERSION_LABEL}
+            >
+              {APP_VERSION_LABEL}
+            </Typography>
+          </Box>
+        )}
 
             {/* Bottom navigation removed (replaced by single Home button menu on mobile). */}
           </Box>
