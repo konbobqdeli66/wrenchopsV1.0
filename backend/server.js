@@ -18,6 +18,7 @@ const authRoutes = require("./routes/authRoutes");
 const clientsRoutes = require("./routes/clients");
 const ordersRoutes = require("./routes/orders");
 const worktimesRoutes = require("./routes/worktimes");
+const packagesRoutes = require("./routes/packages");
 const preferencesRoutes = require("./routes/preferences");
 const vehiclesRoutes = require("./routes/vehicles");
 const adminRoutes = require("./routes/admin");
@@ -44,6 +45,7 @@ app.get('/', (req, res) => {
       clients: '/clients',
       orders: '/orders',
       worktimes: '/worktimes',
+      packages: '/packages',
       vehicles: '/vehicles',
       admin: '/admin',
       preferences: '/preferences'
@@ -211,6 +213,7 @@ app.use("/password-recovery", passwordRecoveryRoutes);
 app.use("/clients", clientsRoutes);
 app.use("/orders", ordersRoutes);
 app.use("/worktimes", worktimesRoutes);
+app.use("/packages", packagesRoutes);
 app.use("/preferences", preferencesRoutes);
 app.use("/vehicles", vehiclesRoutes);
 app.use("/admin", adminRoutes);
@@ -226,7 +229,7 @@ app.use("/admin", adminRoutes);
 // - Non-admins: only Home is visible/accessible by default (read-only),
 //   all other modules are disabled until an admin grants access.
 const ensureDefaultPermissionsForAllUsers = () => {
-  const modules = ['home', 'clients', 'orders', 'worktimes', 'vehicles', 'invoices', 'admin'];
+  const modules = ['home', 'clients', 'orders', 'worktimes', 'packages', 'vehicles', 'invoices', 'admin'];
 
   db.all('SELECT id, role FROM users', [], (err, users) => {
     if (err) {
@@ -329,7 +332,7 @@ const ensureBootstrapAdminUser = (callback) => {
           );
 
           // Create full permissions for admin
-           const modules = ['home', 'clients', 'orders', 'worktimes', 'vehicles', 'invoices', 'admin'];
+           const modules = ['home', 'clients', 'orders', 'worktimes', 'packages', 'vehicles', 'invoices', 'admin'];
           const stmt = db.prepare(
             `INSERT OR IGNORE INTO permissions (user_id, module, can_access_module, can_read, can_write, can_delete)
              VALUES (?, ?, 1, 1, 1, 1)`

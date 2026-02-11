@@ -39,12 +39,29 @@ router.get('/', checkPermission('orders', 'read'), (req, res) => {
         `
           SELECT
             o.*,
-            COALESCE(SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0)), 0) AS total_hours
+            (
+              COALESCE(
+                (
+                  SELECT SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0))
+                  FROM order_worktimes ow
+                  JOIN worktimes w ON w.id = ow.worktime_id
+                  WHERE ow.order_id = o.id
+                ),
+                0
+              )
+              +
+              COALESCE(
+                (
+                  SELECT SUM(COALESCE(p.hours, 0) * COALESCE(op.quantity, 0))
+                  FROM order_packages op
+                  JOIN packages p ON p.id = op.package_id
+                  WHERE op.order_id = o.id
+                ),
+                0
+              )
+            ) AS total_hours
           FROM orders o
-          LEFT JOIN order_worktimes ow ON ow.order_id = o.id
-          LEFT JOIN worktimes w ON w.id = ow.worktime_id
           WHERE o.status = 'active'
-          GROUP BY o.id
           ORDER BY o.created_at DESC
         `,
         [],
@@ -66,16 +83,118 @@ router.get('/completed', checkPermission('orders', 'read'), (req, res) => {
         `
           SELECT
             o.*,
-            COALESCE(SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0)), 0) AS total_hours,
-            (COALESCE(SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0)), 0) * COALESCE((SELECT hourly_rate FROM company_settings WHERE id = 1), 100) * COALESCE(od.mult_out_of_hours, 1) * COALESCE(od.mult_holiday, 1) * COALESCE(od.mult_out_of_service, 1)) AS tax_base_bgn,
-            ((COALESCE(SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0)), 0) * COALESCE((SELECT hourly_rate FROM company_settings WHERE id = 1), 100) * COALESCE(od.mult_out_of_hours, 1) * COALESCE(od.mult_holiday, 1) * COALESCE(od.mult_out_of_service, 1)) * (COALESCE((SELECT vat_rate FROM company_settings WHERE id = 1), 20) / 100.0)) AS vat_amount_bgn,
-            ((COALESCE(SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0)), 0) * COALESCE((SELECT hourly_rate FROM company_settings WHERE id = 1), 100) * COALESCE(od.mult_out_of_hours, 1) * COALESCE(od.mult_holiday, 1) * COALESCE(od.mult_out_of_service, 1)) * (1.0 + (COALESCE((SELECT vat_rate FROM company_settings WHERE id = 1), 20) / 100.0))) AS total_amount_bgn
+            (
+              COALESCE(
+                (
+                  SELECT SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0))
+                  FROM order_worktimes ow
+                  JOIN worktimes w ON w.id = ow.worktime_id
+                  WHERE ow.order_id = o.id
+                ),
+                0
+              )
+              +
+              COALESCE(
+                (
+                  SELECT SUM(COALESCE(p.hours, 0) * COALESCE(op.quantity, 0))
+                  FROM order_packages op
+                  JOIN packages p ON p.id = op.package_id
+                  WHERE op.order_id = o.id
+                ),
+                0
+              )
+            ) AS total_hours,
+            (
+              (
+                COALESCE(
+                  (
+                    SELECT SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0))
+                    FROM order_worktimes ow
+                    JOIN worktimes w ON w.id = ow.worktime_id
+                    WHERE ow.order_id = o.id
+                  ),
+                  0
+                )
+                * COALESCE((SELECT hourly_rate FROM company_settings WHERE id = 1), 100)
+                * COALESCE(od.mult_out_of_hours, 1)
+                * COALESCE(od.mult_holiday, 1)
+                * COALESCE(od.mult_out_of_service, 1)
+              )
+              +
+              COALESCE(
+                (
+                  SELECT SUM(COALESCE(op.price, 0) * COALESCE(op.quantity, 0))
+                  FROM order_packages op
+                  WHERE op.order_id = o.id
+                ),
+                0
+              )
+            ) AS tax_base_bgn,
+            (
+              (
+                (
+                  (
+                    COALESCE(
+                      (
+                        SELECT SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0))
+                        FROM order_worktimes ow
+                        JOIN worktimes w ON w.id = ow.worktime_id
+                        WHERE ow.order_id = o.id
+                      ),
+                      0
+                    )
+                    * COALESCE((SELECT hourly_rate FROM company_settings WHERE id = 1), 100)
+                    * COALESCE(od.mult_out_of_hours, 1)
+                    * COALESCE(od.mult_holiday, 1)
+                    * COALESCE(od.mult_out_of_service, 1)
+                  )
+                  +
+                  COALESCE(
+                    (
+                      SELECT SUM(COALESCE(op.price, 0) * COALESCE(op.quantity, 0))
+                      FROM order_packages op
+                      WHERE op.order_id = o.id
+                    ),
+                    0
+                  )
+                )
+                * (COALESCE((SELECT vat_rate FROM company_settings WHERE id = 1), 20) / 100.0)
+              )
+            ) AS vat_amount_bgn,
+            (
+              (
+                (
+                  (
+                    COALESCE(
+                      (
+                        SELECT SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0))
+                        FROM order_worktimes ow
+                        JOIN worktimes w ON w.id = ow.worktime_id
+                        WHERE ow.order_id = o.id
+                      ),
+                      0
+                    )
+                    * COALESCE((SELECT hourly_rate FROM company_settings WHERE id = 1), 100)
+                    * COALESCE(od.mult_out_of_hours, 1)
+                    * COALESCE(od.mult_holiday, 1)
+                    * COALESCE(od.mult_out_of_service, 1)
+                  )
+                  +
+                  COALESCE(
+                    (
+                      SELECT SUM(COALESCE(op.price, 0) * COALESCE(op.quantity, 0))
+                      FROM order_packages op
+                      WHERE op.order_id = o.id
+                    ),
+                    0
+                  )
+                )
+                * (1.0 + (COALESCE((SELECT vat_rate FROM company_settings WHERE id = 1), 20) / 100.0))
+              )
+            ) AS total_amount_bgn
           FROM orders o
-          LEFT JOIN order_worktimes ow ON ow.order_id = o.id
-          LEFT JOIN worktimes w ON w.id = ow.worktime_id
           LEFT JOIN order_documents od ON od.order_id = o.id
           WHERE o.status = 'completed'
-          GROUP BY o.id
           ORDER BY o.completed_at DESC, o.created_at DESC
         `,
         [],
@@ -125,13 +244,30 @@ router.get('/search', checkPermission('orders', 'read'), (req, res) => {
         `
           SELECT
             o.*,
-            COALESCE(SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0)), 0) AS total_hours
+            (
+              COALESCE(
+                (
+                  SELECT SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0))
+                  FROM order_worktimes ow
+                  JOIN worktimes w ON w.id = ow.worktime_id
+                  WHERE ow.order_id = o.id
+                ),
+                0
+              )
+              +
+              COALESCE(
+                (
+                  SELECT SUM(COALESCE(p.hours, 0) * COALESCE(op.quantity, 0))
+                  FROM order_packages op
+                  JOIN packages p ON p.id = op.package_id
+                  WHERE op.order_id = o.id
+                ),
+                0
+              )
+            ) AS total_hours
           FROM orders o
-          LEFT JOIN order_worktimes ow ON ow.order_id = o.id
-          LEFT JOIN worktimes w ON w.id = ow.worktime_id
           WHERE o.status = 'active'
             AND (o.reg_number LIKE ? COLLATE NOCASE OR o.client_name LIKE ? COLLATE NOCASE)
-          GROUP BY o.id
           ORDER BY o.created_at DESC
         `,
         [`%${q}%`, `%${q}%`],
@@ -420,6 +556,14 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
                 });
             });
 
+        const dbRun = (sql, params) =>
+            new Promise((resolve, reject) => {
+                db.run(sql, params, function (err) {
+                    if (err) return reject(err);
+                    resolve(this);
+                });
+            });
+
         const escapeHtml = (unsafe) =>
             String(unsafe ?? '')
                 .replaceAll('&', '&amp;')
@@ -497,8 +641,37 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
             [orderId]
         );
 
-        const totalHours = worktimeRows.reduce(
+        const packageRows = await dbAll(
+            `
+              SELECT
+                p.id as package_id,
+                p.title as package_title,
+                p.hours,
+                op.quantity,
+                op.notes,
+                op.price,
+                op.is_price_correction,
+                op.created_at
+              FROM order_packages op
+              JOIN packages p ON p.id = op.package_id
+              WHERE op.order_id = ?
+              ORDER BY op.created_at ASC
+            `,
+            [orderId]
+        );
+
+        const laborHours = worktimeRows.reduce(
             (sum, r) => sum + (Number(r.hours) || 0) * (Number(r.quantity) || 0),
+            0
+        );
+        const packageHours = packageRows.reduce(
+            (sum, r) => sum + (Number(r.hours) || 0) * (Number(r.quantity) || 0),
+            0
+        );
+        const totalHours = laborHours + packageHours;
+
+        const packagesBaseAmount = packageRows.reduce(
+            (sum, r) => sum + (Number(r.price) || 0) * (Number(r.quantity) || 0),
             0
         );
 
@@ -513,7 +686,9 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
             (Number(docs?.mult_holiday) || 1) *
             (Number(docs?.mult_out_of_service) || 1);
 
-        const taxBase = totalHours * hourlyRate * multiplier;
+        // Labor uses hourlyRate and multipliers; packages are fixed-price items (stored on the order rows).
+        const laborTaxBase = laborHours * hourlyRate * multiplier;
+        const taxBase = laborTaxBase + packagesBaseAmount;
         const vatAmount = taxBase * (vatRate / 100);
         const totalAmount = taxBase + vatAmount;
 
@@ -658,7 +833,7 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
   </body>
 </html>`;
 
-        const protocolRowsHtml = (worktimeRows || [])
+        const protocolWorktimeRowsHtml = (worktimeRows || [])
             .map((r, idx) => {
                 const h = Number(r.hours) || 0;
                 const q = Number(r.quantity) || 0;
@@ -676,6 +851,29 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
                 `;
             })
             .join('');
+
+        const protocolPackageRowsHtml = (packageRows || [])
+            .map((r, idx) => {
+                const h = Number(r.hours) || 0;
+                const q = Number(r.quantity) || 0;
+                const total = h * q;
+                const notes = r.notes ? escapeHtml(r.notes) : '';
+                // Continue numbering after worktimes.
+                const no = (worktimeRows?.length || 0) + idx + 1;
+                return `
+                  <tr>
+                    <td style="text-align:center">${no}</td>
+                    <td>${escapeHtml(r.package_title || '')}</td>
+                    <td style="white-space: pre-wrap;">${notes}</td>
+                    <td style="text-align:right">${h.toFixed(2).replace(/\.00$/, '')}</td>
+                    <td style="text-align:right">${q}</td>
+                    <td style="text-align:right">${total.toFixed(2).replace(/\.00$/, '')}</td>
+                  </tr>
+                `;
+            })
+            .join('');
+
+        const protocolRowsHtml = `${protocolWorktimeRowsHtml || ''}${protocolPackageRowsHtml || ''}`;
 
         const protocolHtml = `<!doctype html>
 <html>
@@ -806,6 +1004,46 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
             });
             if (!ok) {
                 return res.status(500).json({ error: 'Грешка при изпращане на имейла.' });
+            }
+
+            // Update packages.last_invoiced_* based on this invoice (rule C).
+            // - Always set last_invoiced_* when the invoiced unit price is higher.
+            // - If the invoiced unit price is lower, only update when is_price_correction=1.
+            // NOTE: The order row prices remain unchanged.
+            if (Array.isArray(packageRows) && packageRows.length) {
+              const byPkg = new Map();
+              for (const r of packageRows) {
+                const pid = Number(r.package_id);
+                if (!Number.isFinite(pid) || pid <= 0) continue;
+                const createdAt = String(r.created_at || '');
+                const prev = byPkg.get(pid);
+                if (!prev || String(prev.created_at || '') < createdAt) {
+                  byPkg.set(pid, r);
+                }
+              }
+
+              await dbRun('BEGIN IMMEDIATE TRANSACTION', []);
+              try {
+                for (const [pid, r] of byPkg.entries()) {
+                  const unitPrice = Number(r.price) || 0;
+                  const isCorrection = Number(r.is_price_correction) === 1;
+                  const current = await dbGet('SELECT last_invoiced_price FROM packages WHERE id = ?', [pid]);
+                  const currentLast = Number(current?.last_invoiced_price) || 0;
+
+                  const shouldUpdate = unitPrice > currentLast || (unitPrice < currentLast && isCorrection);
+                  if (!shouldUpdate) continue;
+
+                  await dbRun(
+                    'UPDATE packages SET last_invoiced_price = ?, last_invoiced_at = datetime(\'now\') WHERE id = ?',
+                    [unitPrice, pid]
+                  );
+                }
+                await dbRun('COMMIT', []);
+              } catch (e) {
+                await dbRun('ROLLBACK', []).catch(() => null);
+                // Do not fail invoice sending due to post-update issues.
+                console.warn('Could not update packages last_invoiced_*:', e?.message || String(e));
+              }
             }
         } finally {
             try { await invoicePage.close(); } catch {}
@@ -959,6 +1197,115 @@ router.get('/:orderId/worktimes', checkPermission('orders', 'read'), (req, res) 
         }
         res.json(rows);
     });
+});
+
+// --- Packages on order (work card) ---
+
+// Add package to order
+router.post('/:orderId/packages', checkPermission('orders', 'write'), (req, res) => {
+  const { orderId } = req.params;
+  const { package_id, quantity, notes, price, is_price_correction } = req.body || {};
+
+  if (!package_id) {
+    return res.status(400).json({ error: 'package_id е задължително поле' });
+  }
+
+  const qtyToAdd = Math.max(1, parseInt(quantity, 10) || 1);
+  const cleanNotes = String(notes || '').trim();
+  const unitPrice = Number(String(price ?? '').replace(',', '.'));
+  const safePrice = Number.isFinite(unitPrice) ? unitPrice : 0;
+  const isCorrection = Number(is_price_correction) === 1 ? 1 : 0;
+
+  db.run(
+    'INSERT INTO order_packages (order_id, package_id, quantity, notes, price, is_price_correction) VALUES (?, ?, ?, ?, ?, ?)',
+    [orderId, package_id, qtyToAdd, cleanNotes || '', safePrice, isCorrection],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      db.get(
+        `
+          SELECT op.*, p.title as package_title, p.hours
+          FROM order_packages op
+          JOIN packages p ON p.id = op.package_id
+          WHERE op.id = ?
+        `,
+        [this.lastID],
+        (gErr, row) => {
+          if (gErr) return res.status(500).json({ error: gErr.message });
+          return res.json(row);
+        }
+      );
+    }
+  );
+});
+
+// List packages for order
+router.get('/:orderId/packages', checkPermission('orders', 'read'), (req, res) => {
+  const { orderId } = req.params;
+  db.all(
+    `
+      SELECT op.*, p.title as package_title, p.hours
+      FROM order_packages op
+      JOIN packages p ON p.id = op.package_id
+      WHERE op.order_id = ?
+      ORDER BY op.created_at DESC
+    `,
+    [orderId],
+    (err, rows) => {
+      if (err) return res.status(500).json({ error: err.message });
+      return res.json(rows || []);
+    }
+  );
+});
+
+// Update an order package row (notes, quantity, price, correction flag)
+router.put('/:orderId/packages/:orderPackageId', checkPermission('orders', 'write'), (req, res) => {
+  const { orderId, orderPackageId } = req.params;
+  const { notes, quantity, price, is_price_correction } = req.body || {};
+
+  const cleanNotes = notes === undefined ? null : String(notes || '').trim();
+  const qty = quantity === undefined || quantity === null ? null : Math.max(1, parseInt(quantity, 10) || 1);
+  const pRaw = price === undefined || price === null ? null : Number(String(price ?? '').replace(',', '.'));
+  const safePrice = pRaw === null ? null : (Number.isFinite(pRaw) ? pRaw : 0);
+  const corr = is_price_correction === undefined || is_price_correction === null ? null : (Number(is_price_correction) === 1 ? 1 : 0);
+
+  db.run(
+    `
+      UPDATE order_packages
+      SET
+        notes = COALESCE(?, notes),
+        quantity = COALESCE(?, quantity),
+        price = COALESCE(?, price),
+        is_price_correction = COALESCE(?, is_price_correction)
+      WHERE id = ? AND order_id = ?
+    `,
+    [cleanNotes, qty, safePrice, corr, orderPackageId, orderId],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      if (this.changes === 0) return res.status(404).json({ error: 'Пакетната операция не е намерена в тази поръчка.' });
+      db.get(
+        `
+          SELECT op.*, p.title as package_title, p.hours
+          FROM order_packages op
+          JOIN packages p ON p.id = op.package_id
+          WHERE op.id = ? AND op.order_id = ?
+        `,
+        [orderPackageId, orderId],
+        (gErr, row) => {
+          if (gErr) return res.status(500).json({ error: gErr.message });
+          return res.json(row);
+        }
+      );
+    }
+  );
+});
+
+// Delete an order package row
+router.delete('/packages/:orderPackageId', checkPermission('orders', 'delete'), (req, res) => {
+  const { orderPackageId } = req.params;
+  db.run('DELETE FROM order_packages WHERE id = ?', [orderPackageId], function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    return res.json({ success: true });
+  });
 });
 
 // Обновяване на бележки за нормовреме в поръчка

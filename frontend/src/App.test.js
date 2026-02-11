@@ -1,8 +1,8 @@
 import { render, screen } from '@testing-library/react';
 import App from './App';
 
-test('renders learn react link', () => {
+test('renders login screen when no token is present', () => {
   render(<App />);
-  const linkElement = screen.getByText(/learn react/i);
-  expect(linkElement).toBeInTheDocument();
+  // When there is no JWT token in localStorage, App redirects to /login.
+  expect(screen.getByText(/Вход в системата/i)).toBeInTheDocument();
 });

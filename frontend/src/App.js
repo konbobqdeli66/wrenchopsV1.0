@@ -36,6 +36,7 @@ import Home from "./pages/Home";
 import Clients from "./pages/Clients";
 import Orders from "./pages/Orders";
 import Worktimes from "./pages/Worktimes";
+import Packages from "./pages/Packages";
 import Vehicles from "./pages/Vehicles";
 import Admin from "./pages/Admin";
 import Invoices from "./pages/Invoices";
@@ -347,7 +348,7 @@ const createAppTheme = (mode, primaryColor = '#1976d2', appBarGradient = 'pink')
 
 // Page index -> permission module key mapping.
 // Invoices have their own permission module.
-const PAGE_MODULES = ['home', 'clients', 'orders', 'worktimes', 'vehicles', 'invoices', 'admin'];
+const PAGE_MODULES = ['home', 'clients', 'orders', 'worktimes', 'packages', 'vehicles', 'invoices', 'admin'];
 
 // Главен интерфейс след login
 function MainApp() {
@@ -617,9 +618,10 @@ function MainApp() {
     { label: t('clients'), icon: <PeopleIcon />, page: 1, module: 'clients' },
     { label: t('orders'), icon: <AssignmentIcon />, page: 2, module: 'orders' },
     { label: t('worktimes'), icon: <AccessTimeIcon />, page: 3, module: 'worktimes' },
-    { label: t('vehicles'), icon: <DirectionsCarIcon />, page: 4, module: 'vehicles' },
-    { label: t('invoices'), icon: <ReceiptLongIcon />, page: 5, module: 'invoices' },
-    ...(userRole === 'admin' ? [{ label: t('admin'), icon: <AdminPanelSettingsIcon />, page: 6, module: 'admin' }] : [])
+    { label: t('packages') || 'Пакетни операции', icon: <BuildIcon />, page: 4, module: 'packages' },
+    { label: t('vehicles'), icon: <DirectionsCarIcon />, page: 5, module: 'vehicles' },
+    { label: t('invoices'), icon: <ReceiptLongIcon />, page: 6, module: 'invoices' },
+    ...(userRole === 'admin' ? [{ label: t('admin'), icon: <AdminPanelSettingsIcon />, page: 7, module: 'admin' }] : [])
   ];
 
   // Always show all tabs, but disable access based on permissions.
@@ -1115,11 +1117,12 @@ function MainApp() {
         <Container maxWidth="xl" sx={{ py: 2 }}>
           {page === 0 && <Home setPage={setPage} t={t} />}
           {page === 1 && <Clients setPage={setPage} t={t} />}
-          {page === 2 && <Orders t={t} />}
+          {page === 2 && <Orders t={t} userRole={userRole} userPermissions={userPermissions} />}
           {page === 3 && <Worktimes t={t} />}
-          {page === 4 && <Vehicles setPage={setPage} t={t} />}
-          {page === 5 && <Invoices t={t} canDeleteInvoices={canDeleteInvoices} />}
-          {page === 6 && userRole === 'admin' && <Admin t={t} />}
+          {page === 4 && <Packages t={t} />}
+          {page === 5 && <Vehicles setPage={setPage} t={t} />}
+          {page === 6 && <Invoices t={t} canDeleteInvoices={canDeleteInvoices} />}
+          {page === 7 && userRole === 'admin' && <Admin t={t} />}
         </Container>
 
         {/* App footer: version bottom-right (desktop only) */}

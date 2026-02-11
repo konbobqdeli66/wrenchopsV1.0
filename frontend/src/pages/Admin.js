@@ -30,7 +30,9 @@ import {
   Alert,
   TextField,
   useMediaQuery,
-  Stack
+  Stack,
+  ToggleButton,
+  ToggleButtonGroup
 } from "@mui/material";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import PersonIcon from "@mui/icons-material/Person";
@@ -169,6 +171,7 @@ export default function Admin({ t }) {
     // Invoices use their own permission module for invoice-document deletion.
     { key: 'invoices', label: t('invoices') },
     { key: 'worktimes', label: t('worktimes') },
+    { key: 'packages', label: t('packages') || 'Пакетни операции' },
     { key: 'vehicles', label: t('vehicles') },
     { key: 'admin', label: t('admin') },
   ];
@@ -288,6 +291,48 @@ export default function Admin({ t }) {
           : perm
       )
     );
+  };
+
+  // Work card options enforcement (3 options):
+  // - worktimes only
+  // - packages only
+  // - both
+  const workCardMode = (() => {
+    const wt = userPermissions.find((p) => p.module === 'worktimes');
+    const pk = userPermissions.find((p) => p.module === 'packages');
+    const wtOn = Number(wt?.can_access_module) === 1 && Number(wt?.can_read) === 1;
+    const pkOn = Number(pk?.can_access_module) === 1 && Number(pk?.can_read) === 1;
+    if (wtOn && pkOn) return 'both';
+    if (wtOn) return 'worktimes_only';
+    if (pkOn) return 'packages_only';
+    // If neither is enabled, default the selector to worktimes_only (admin can still change).
+    return 'worktimes_only';
+  })();
+
+  const applyWorkCardMode = (mode) => {
+    setUserPermissions((prev) => {
+      const list = Array.isArray(prev) ? prev : [];
+      return list.map((perm) => {
+        if (perm.module !== 'worktimes' && perm.module !== 'packages') return perm;
+
+        const enableWorktimes = mode === 'worktimes_only' || mode === 'both';
+        const enablePackages = mode === 'packages_only' || mode === 'both';
+
+        if (perm.module === 'worktimes') {
+          return {
+            ...perm,
+            can_access_module: enableWorktimes ? 1 : 0,
+            can_read: enableWorktimes ? 1 : 0,
+          };
+        }
+
+        return {
+          ...perm,
+          can_access_module: enablePackages ? 1 : 0,
+          can_read: enablePackages ? 1 : 0,
+        };
+      });
+    });
   };
 
   const handleSavePermissions = async () => {
@@ -1494,10 +1539,39 @@ export default function Admin({ t }) {
             {t('permissionsHelp')}
           </Typography>
 
+          <Card variant="outlined" sx={{ mb: 3 }}>
+            <CardContent>
+              <Typography variant="subtitle1" sx={{ fontWeight: 900, mb: 1 }}>
+                Режим на работната карта
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 700, mb: 1.5 }}>
+                Ограничение за „Нормовремена“ / „Пакетни операции“ (точно 3 опции).
+              </Typography>
+              <ToggleButtonGroup
+                value={workCardMode}
+                exclusive
+                onChange={(_, val) => {
+                  if (!val) return;
+                  applyWorkCardMode(val);
+                }}
+                size="small"
+              >
+                <ToggleButton value="worktimes_only">Само нормовремена</ToggleButton>
+                <ToggleButton value="packages_only">Само пакетни операции</ToggleButton>
+                <ToggleButton value="both">И двете</ToggleButton>
+              </ToggleButtonGroup>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                Забележка: права „Писане/Триене“ за каталог „Нормовремена/Пакети“ се управляват от switches по-долу.
+              </Typography>
+            </CardContent>
+          </Card>
+
           <Grid container spacing={3}>
             {modules.map((module) => {
               const currentPerm = userPermissions.find(p => p.module === module.key) ||
                 { module: module.key, can_access_module: 1, can_read: 1, can_write: 0, can_delete: 0 };
+
+              const isWorkCardModule = module.key === 'worktimes' || module.key === 'packages';
 
               return (
                 <Grid item xs={12} key={module.key}>
@@ -1515,9 +1589,15 @@ export default function Admin({ t }) {
                             checked={currentPerm.can_access_module === 1}
                             onChange={(e) => handlePermissionChange(module.key, 'can_access_module', e.target.checked)}
                             color="primary"
+                            disabled={isWorkCardModule}
                           />
                         </Box>
                       </Box>
+                      {isWorkCardModule ? (
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                          Достъпът и „Четене“ за този модул се управляват от „Режим на работната карта“.
+                        </Typography>
+                      ) : null}
                       <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                           <Typography variant="body2" sx={{ minWidth: 60 }}>{t('read')}:</Typography>
@@ -1526,7 +1606,7 @@ export default function Admin({ t }) {
                             onChange={(e) => handlePermissionChange(module.key, 'can_read', e.target.checked)}
                             color="primary"
                             size="small"
-                            disabled={currentPerm.can_access_module !== 1}
+                            disabled={currentPerm.can_access_module !== 1 || isWorkCardModule}
                           />
                         </Box>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
