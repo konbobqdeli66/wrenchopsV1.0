@@ -28,6 +28,8 @@ import {
   DialogContent,
   DialogActions,
   Paper,
+  Tabs,
+  Tab,
   Fab,
   Stack
 } from "@mui/material";
@@ -69,6 +71,9 @@ export default function Orders({ t }) {
   const [orderVehicleType, setOrderVehicleType] = useState('truck');
   const [worktimeCategoryKey, setWorktimeCategoryKey] = useState('regular');
   const [worktimeSubcategoryKey, setWorktimeSubcategoryKey] = useState('');
+  // Step navigation inside the "pick worktime" modal:
+  // Group -> Subgroup -> Worktime
+  const [worktimeNavStep, setWorktimeNavStep] = useState('category'); // 'category' | 'subcategory' | 'worktimes'
   const [worktimeSearch, setWorktimeSearch] = useState("");
   const [worktimeForm, setWorktimeForm] = useState({
     worktime_id: "",
@@ -402,6 +407,8 @@ export default function Orders({ t }) {
 
   const handleWorktimeSelect = (worktime) => {
     setWorktimeSelectionOpen(false);
+    setWorktimeNavStep('category');
+    setWorktimeSearch('');
     // Auto-add the worktime with default quantity
     addWorktimeToOrderWithDefaults(worktime);
   };
@@ -1084,7 +1091,11 @@ export default function Orders({ t }) {
         <Fab
           color="primary"
           aria-label="add worktime"
-          onClick={() => setWorktimeSelectionOpen(true)}
+          onClick={() => {
+            setWorktimeNavStep('category');
+            setWorktimeSearch('');
+            setWorktimeSelectionOpen(true);
+          }}
           sx={{
             position: 'absolute',
             bottom: 80,
@@ -1222,122 +1233,125 @@ export default function Orders({ t }) {
         }}
       >
         <DialogTitle sx={hcDialogTitleSx}>
+          {worktimeNavStep !== 'category' ? (
+            <IconButton
+              onClick={() => {
+                if (worktimeNavStep === 'worktimes' && orderVehicleType !== 'trailer') {
+                  setWorktimeNavStep('subcategory');
+                  return;
+                }
+                // Back to group selection
+                setWorktimeNavStep('category');
+                setWorktimeSubcategoryKey('');
+              }}
+              sx={{ mr: 0.5 }}
+              aria-label="Back"
+            >
+              <ArrowBackIcon />
+            </IconButton>
+          ) : (
+            // Keep title alignment
+            <Box sx={{ width: 40 }} />
+          )}
           <AddIcon sx={{ fontSize: '1.5rem' }} />
           Избери нормовреме за добавяне
         </DialogTitle>
         <DialogContent sx={{ p: 0 }}>
-          <Box
-            sx={{
-              borderBottom: (theme) => `2px solid ${theme.palette.mode === 'dark' ? '#555' : '#ccc'}`,
-              backgroundColor: (theme) => theme.palette.mode === 'dark' ? '#2a2a2a' : '#f8f8f8',
-              p: 2,
-            }}
-          >
-            <Typography sx={{ fontWeight: 800, mb: 1 }}>
-              Категория ({orderVehicleType === 'trailer' ? 'Ремарке' : 'Автомобил'})
-            </Typography>
+          {/* Step 1: Group */}
+          {worktimeNavStep === 'category' ? (
             <Box
               sx={{
-                display: 'grid',
-                gridTemplateColumns: {
-                  xs: 'repeat(2, 1fr)',
-                  sm: 'repeat(3, 1fr)',
-                  md: orderVehicleType === 'trailer' ? 'repeat(5, 1fr)' : 'repeat(3, 1fr)',
-                },
-                gap: 1,
+                borderBottom: (theme) => `2px solid ${theme.palette.mode === 'dark' ? '#555' : '#ccc'}`,
+                backgroundColor: (theme) => theme.palette.mode === 'dark' ? '#2a2a2a' : '#f8f8f8',
+                p: 2,
               }}
             >
-              {selectionCategories.map((cat) => {
-                const count = availableWorktimes.filter(
-                  (w) => getWorktimeCategoryKey(w, orderVehicleType) === cat.key
-                ).length;
-                const selected = worktimeCategoryKey === cat.key;
-                return (
-                  <Button
-                    key={cat.key}
-                    variant={selected ? 'contained' : 'outlined'}
-                    onClick={() => {
-                      setWorktimeCategoryKey(cat.key);
-                      if (orderVehicleType !== 'trailer') {
-                        const firstSub = getSubcategoriesForCategoryKey(orderVehicleType, cat.key)[0]?.key || '';
-                        setWorktimeSubcategoryKey(firstSub);
-                      } else {
-                        setWorktimeSubcategoryKey('');
-                      }
-                    }}
-                    sx={{
-                      justifyContent: 'space-between',
-                      textAlign: 'left',
-                      py: 1,
-                      px: 1.25,
-                      borderRadius: 2,
-                    }}
-                  >
-                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0.25 }}>
-                      <Typography sx={{ fontWeight: 900 }}>{cat.no}</Typography>
-                      <Typography sx={{ fontSize: 13, fontWeight: 700, lineHeight: 1.1 }}>
-                        {cat.label}
-                      </Typography>
-                    </Box>
-                    <Chip
-                      label={count}
-                      size="small"
-                      color={selected ? 'default' : 'primary'}
-                      variant={selected ? 'filled' : 'outlined'}
-                      sx={{ fontWeight: 900 }}
-                    />
-                  </Button>
-                );
-              })}
-            </Box>
-          </Box>
-          {/* Subgroup list (trucks only) */}
-          {orderVehicleType !== 'trailer' && selectionSubcategoriesWithLegacy.length > 0 ? (
-            <Box sx={{ px: 3, pt: 2 }}>
               <Typography sx={{ fontWeight: 800, mb: 1 }}>
-                Подгрупа
+                Главна група ({orderVehicleType === 'trailer' ? 'Ремарке' : 'Автомобил'})
               </Typography>
-              <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
-                <List dense sx={{ p: 0 }}>
-                  {selectionSubcategoriesWithLegacy.map((sub, idx) => {
-                    const selected = worktimeSubcategoryKey === sub.key;
-                    return (
-                      <div key={sub.key}>
-                        <ListItem
-                          disablePadding
-                          selected={selected}
-                          onClick={() => setWorktimeSubcategoryKey(sub.key)}
-                          sx={{ cursor: 'pointer' }}
-                        >
-                          <ListItemText
-                            primary={
-                              sub.key === '__legacy__'
-                                ? String(sub.label)
-                                : `${sub.no}. ${sub.label}`
-                            }
-                            primaryTypographyProps={{
-                              sx: {
-                                fontWeight: 800,
-                                whiteSpace: 'nowrap',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                              },
-                            }}
-                            sx={{ px: 1.5, py: 0.75 }}
-                          />
-                          <Box sx={{ pr: 1.25, color: 'text.secondary', fontWeight: 900 }}>
-                            »
-                          </Box>
-                        </ListItem>
-                        {idx < selectionSubcategoriesWithLegacy.length - 1 ? <Divider /> : null}
-                      </div>
-                    );
-                  })}
-                </List>
-              </Paper>
+
+              <Tabs
+                value={worktimeCategoryKey}
+                onChange={(_, newKey) => {
+                  setWorktimeCategoryKey(newKey);
+                  setWorktimeSearch('');
+
+                  if (orderVehicleType === 'trailer') {
+                    setWorktimeSubcategoryKey('');
+                    setWorktimeNavStep('worktimes');
+                    return;
+                  }
+
+                  const firstSub =
+                    getSubcategoriesForCategoryKey(orderVehicleType, newKey)[0]?.key || '';
+                  setWorktimeSubcategoryKey(firstSub);
+                  setWorktimeNavStep('subcategory');
+                }}
+                variant="scrollable"
+                scrollButtons="auto"
+                allowScrollButtonsMobile
+                sx={{ minHeight: 42 }}
+              >
+                {selectionCategories.map((cat) => {
+                  const count = (availableWorktimes || []).filter(
+                    (w) => getWorktimeCategoryKey(w, orderVehicleType) === cat.key
+                  ).length;
+                  return (
+                    <Tab
+                      key={cat.key}
+                      value={cat.key}
+                      label={`${cat.no}. ${cat.label} (${count})`}
+                      sx={{ fontWeight: 900, textTransform: 'none' }}
+                    />
+                  );
+                })}
+              </Tabs>
             </Box>
           ) : null}
 
+          {/* Step 2: Subgroup (trucks only) */}
+          {worktimeNavStep === 'subcategory' && orderVehicleType !== 'trailer' ? (
+            <Box
+              sx={{
+                borderBottom: (theme) => `2px solid ${theme.palette.mode === 'dark' ? '#555' : '#ccc'}`,
+                backgroundColor: (theme) => theme.palette.mode === 'dark' ? '#2a2a2a' : '#f8f8f8',
+                p: 2,
+              }}
+            >
+              <Typography sx={{ fontWeight: 800, mb: 1 }}>
+                Подгрупа
+              </Typography>
+
+              <Tabs
+                value={worktimeSubcategoryKey}
+                onChange={(_, newSubKey) => {
+                  setWorktimeSubcategoryKey(newSubKey);
+                  setWorktimeSearch('');
+                  setWorktimeNavStep('worktimes');
+                }}
+                variant="scrollable"
+                scrollButtons="auto"
+                allowScrollButtonsMobile
+                sx={{ minHeight: 42 }}
+              >
+                {selectionSubcategoriesWithLegacy.map((sub) => (
+                  <Tab
+                    key={sub.key}
+                    value={sub.key}
+                    label={
+                      sub.key === '__legacy__'
+                        ? String(sub.label)
+                        : `${sub.no}. ${sub.label}`
+                    }
+                    sx={{ fontWeight: 900, textTransform: 'none' }}
+                  />
+                ))}
+              </Tabs>
+            </Box>
+          ) : null}
+
+          {/* Step 3: Worktimes */}
+          {worktimeNavStep === 'worktimes' ? (
           <Box sx={{ p: 3 }}>
             {/* Mobile Tab Indicator */}
             <Box sx={{ display: { xs: 'block', sm: 'none' }, mb: 2 }}>
@@ -1571,6 +1585,7 @@ export default function Orders({ t }) {
               )}
             </List>
           </Box>
+          ) : null}
         </DialogContent>
         <DialogActions sx={{
           p: 3,

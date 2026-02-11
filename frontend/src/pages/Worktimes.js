@@ -5,11 +5,9 @@ import {
   Typography,
   TextField,
   Button,
-  ButtonBase,
   Grid,
   Card,
   CardContent,
-  Paper,
   List,
   ListItem,
   ListItemText,
@@ -48,6 +46,8 @@ export default function Worktimes({ t }) {
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState('truck');
   const [activeCategoryKey, setActiveCategoryKey] = useState('regular');
   const [activeSubcategoryKey, setActiveSubcategoryKey] = useState('');
+  // Navigation level: Main group -> Subgroup -> Worktimes list
+  const [navStep, setNavStep] = useState('category'); // 'category' | 'subcategory' | 'worktimes'
   const isPhone = useMediaQuery('(max-width:600px)');
   const [search, setSearch] = useState('');
   const [form, setForm] = useState({
@@ -95,6 +95,9 @@ export default function Worktimes({ t }) {
   }, [worktimes, vehicleTypeFilter]);
 
   const filteredWorktimes = useMemo(() => {
+    // Only show worktimes after the user reaches the final step.
+    if (navStep !== 'worktimes') return [];
+
     const q = String(search || '').trim().toLowerCase();
     return (worktimes || [])
       .filter((w) => getWorktimeCategoryKey(w, vehicleTypeFilter) === activeCategoryKey)
@@ -114,7 +117,7 @@ export default function Worktimes({ t }) {
         if (!q) return true;
         return String(w?.title || '').toLowerCase().includes(q);
       });
-  }, [worktimes, vehicleTypeFilter, activeCategoryKey, activeSubcategoryKey, search, subcategoriesWithLegacy.length]);
+  }, [worktimes, vehicleTypeFilter, activeCategoryKey, activeSubcategoryKey, search, subcategoriesWithLegacy.length, navStep]);
 
   const loadWorktimes = useCallback(async () => {
     const res = await axios.get(
@@ -128,45 +131,24 @@ export default function Worktimes({ t }) {
   }, [loadWorktimes]);
 
   useEffect(() => {
-    // Keep selected category valid when filter changes.
-    const keys = new Set(getCategoriesForVehicleType(vehicleTypeFilter).map((c) => c.key));
-    if (!keys.has(activeCategoryKey)) {
-      setActiveCategoryKey(getCategoriesForVehicleType(vehicleTypeFilter)[0]?.key || 'regular');
-    }
-
-    // Reset subcategory when switching vehicle type.
-    if (vehicleTypeFilter === 'trailer') {
-      setActiveSubcategoryKey('');
-    } else {
-      // Trucks: default to the first subcategory for the active category.
-      const firstSub = getSubcategoriesForCategoryKey(vehicleTypeFilter, activeCategoryKey)[0]?.key || '';
-      if (firstSub && !activeSubcategoryKey) setActiveSubcategoryKey(firstSub);
-    }
-  }, [vehicleTypeFilter, activeCategoryKey, activeSubcategoryKey]);
+    // When vehicle type changes we restart the navigation from the first step.
+    const firstCatKey = getCategoriesForVehicleType(vehicleTypeFilter)[0]?.key || 'regular';
+    setActiveCategoryKey(firstCatKey);
+    setActiveSubcategoryKey('');
+    setNavStep('category');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vehicleTypeFilter]);
 
   useEffect(() => {
-    // Keep selected subcategory valid when category changes.
-    if (vehicleTypeFilter === 'trailer') {
-      setActiveSubcategoryKey('');
-      return;
-    }
+    // Keep a valid subcategory key when on trucks.
+    if (vehicleTypeFilter === 'trailer') return;
 
     const list = getSubcategoriesForCategoryKey(vehicleTypeFilter, activeCategoryKey);
     const keys = new Set(list.map((s) => s.key));
-
-    // Always force a valid subcategory when subcategories exist.
-    // This makes the navigation strictly: Main Group -> Subgroup -> Worktimes.
-    const firstSub = list[0]?.key || '';
-    if (!activeSubcategoryKey) {
-      if (firstSub) setActiveSubcategoryKey(firstSub);
-      return;
-    }
-
-    // Accept legacy group as a valid subcategory selector.
+    if (!activeSubcategoryKey) return;
     if (activeSubcategoryKey === '__legacy__') return;
-
     if (!keys.has(activeSubcategoryKey)) {
-      setActiveSubcategoryKey(firstSub);
+      setActiveSubcategoryKey('');
     }
   }, [vehicleTypeFilter, activeCategoryKey, activeSubcategoryKey]);
 
@@ -456,7 +438,7 @@ export default function Worktimes({ t }) {
                   value={vehicleTypeFilter}
                   onChange={(e, newValue) => {
                     setVehicleTypeFilter(newValue);
-                    setActiveCategoryKey(getCategoriesForVehicleType(newValue)[0]?.key || 'regular');
+                    // reset happens via the vehicleTypeFilter effect
                   }}
                   variant="scrollable"
                   scrollButtons="auto"
@@ -489,176 +471,98 @@ export default function Worktimes({ t }) {
                 </Tabs>
               </Box>
 
-              {/* Category selector (grid buttons like the "normovremena" picker) */}
+              {/* Step navigation: Category -> Subcategory -> Worktimes */}
               <Box sx={{ borderBottom: 1, borderColor: 'divider', mt: 1, pb: 1.25 }}>
-                <Box
-                  sx={{
-                    display: 'grid',
-                    gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: '1fr 1fr 1fr' },
-                    gap: 1,
-                    alignItems: 'stretch',
-                  }}
-                >
-                  {categories.map((cat) => {
-                    const isActive = activeCategoryKey === cat.key;
-                    const count = countByCategoryKey[cat.key] || 0;
-                    const label = String(cat?.label || '');
-                    // If a category label is long, make it smaller on mobile so it fits better.
-                    const isLongLabel = label.length >= 16;
-                    const categoryLabelFontSize = {
-                      xs: isLongLabel ? 10 : 11,
-                      sm: isLongLabel ? '0.80rem' : '0.86rem',
-                      md: isLongLabel ? '0.84rem' : '0.90rem',
-                    };
-                    // Allow more lines on mobile so labels can fit without needing ellipsis.
-                    const categoryLabelMaxHeight = {
-                      xs: isLongLabel ? '5.0em' : '4.2em',
-                      sm: 'none',
-                      // Web/desktop: allow up to ~2 lines (avoid ellipsis for long labels).
-                      md: isLongLabel ? '2.6em' : '2.4em',
-                    };
+                {navStep !== 'category' ? (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => {
+                      if (navStep === 'worktimes' && vehicleTypeFilter !== 'trailer') {
+                        setNavStep('subcategory');
+                        return;
+                      }
+                      // Back to category selection.
+                      setNavStep('category');
+                      setActiveSubcategoryKey('');
+                    }}
+                    sx={{ mb: 1 }}
+                  >
+                    ← Назад
+                  </Button>
+                ) : null}
 
-                    return (
-                        <ButtonBase
+                {navStep === 'category' ? (
+                  <Tabs
+                    value={activeCategoryKey}
+                    onChange={(_, newKey) => {
+                      setActiveCategoryKey(newKey);
+                      if (vehicleTypeFilter === 'trailer') {
+                        setNavStep('worktimes');
+                        return;
+                      }
+                      const firstSub = getSubcategoriesForCategoryKey(vehicleTypeFilter, newKey)[0]?.key || '';
+                      setActiveSubcategoryKey(firstSub);
+                      setNavStep('subcategory');
+                    }}
+                    variant="scrollable"
+                    scrollButtons="auto"
+                    allowScrollButtonsMobile
+                    sx={{ minHeight: 42 }}
+                  >
+                    {categories.map((cat) => {
+                      const count = countByCategoryKey[cat.key] || 0;
+                      return (
+                        <Tab
                           key={cat.key}
-                          onClick={() => {
-                            setActiveCategoryKey(cat.key);
-                            // Default to the first subcategory when switching categories (trucks only).
-                            if (vehicleTypeFilter !== 'trailer') {
-                              const firstSub = getSubcategoriesForCategoryKey(vehicleTypeFilter, cat.key)[0]?.key || '';
-                              setActiveSubcategoryKey(firstSub);
-                            } else {
-                              setActiveSubcategoryKey('');
-                            }
-                          }}
-                        sx={(theme) => ({
-                          width: '100%',
-                          textAlign: 'left',
-                          borderRadius: 999,
-                          border: `1px solid ${isActive ? theme.palette.primary.main : theme.palette.divider}`,
-                          backgroundColor: isActive ? theme.palette.primary.main : 'transparent',
-                          color: isActive ? theme.palette.primary.contrastText : theme.palette.text.primary,
-                          padding: { xs: '8px 10px', sm: '10px 12px' },
-                          minHeight: { xs: 44, sm: 46, md: 54 },
-                          display: 'grid',
-                          gridTemplateColumns: { xs: '22px minmax(0, 1fr) auto', sm: '28px minmax(0, 1fr) auto' },
-                          alignItems: 'center',
-                          columnGap: { xs: 8, sm: 10 },
-                          overflow: 'hidden',
-                          transition: 'background-color 120ms ease, border-color 120ms ease',
-                          '&:hover': {
-                            backgroundColor: isActive
-                              ? theme.palette.primary.dark
-                              : theme.palette.action.hover,
-                          },
-                        })}
-                      >
-                        <Box
-                          sx={{
-                            width: { xs: 22, sm: 28 },
-                            textAlign: 'center',
-                            fontWeight: 900,
-                            fontSize: { xs: '0.95rem', sm: '1rem' },
-                            lineHeight: 1,
-                          }}
-                        >
-                          {cat.no}
-                        </Box>
-                        <Box sx={{ flex: 1, minWidth: 0 }}>
-                          <Typography
-                            variant="body2"
-                            sx={{
-                              fontWeight: 900,
-                              // Phone: allow wrapping (no "...") and keep buttons aligned.
-                              whiteSpace: { xs: 'normal', sm: 'nowrap', md: 'normal' },
-                              overflow: { xs: 'hidden', sm: 'hidden', md: 'hidden' },
-                              textOverflow: { xs: 'clip', sm: 'ellipsis', md: 'clip' },
-                              display: 'block',
-                              wordBreak: { xs: 'break-word', sm: 'normal' },
-                              overflowWrap: { xs: 'anywhere', sm: 'normal' },
-                              lineHeight: { xs: 1.08, sm: 1.2 },
-                              fontSize: categoryLabelFontSize,
-                              // Visually cap to ~3 lines on phone without adding ellipsis.
-                              maxHeight: categoryLabelMaxHeight,
-                            }}
-                            title={cat.label}
-                          >
-                            {cat.label}
-                          </Typography>
-                        </Box>
-                        <Chip
-                          label={count}
-                          size="small"
-                          variant={isActive ? 'filled' : 'outlined'}
-                          sx={(theme) => ({
-                            fontWeight: 900,
-                            height: { xs: 22, sm: 24 },
-                            minWidth: { xs: 26, sm: 34 },
-                            fontSize: { xs: 10, sm: 12 },
-                            flexShrink: 0,
-                            justifySelf: 'end',
-                            borderColor: isActive ? 'transparent' : theme.palette.primary.main,
-                            backgroundColor: isActive ? theme.palette.primary.light : 'transparent',
-                            color: isActive ? theme.palette.primary.contrastText : theme.palette.primary.main,
-                          })}
+                          value={cat.key}
+                          label={`${cat.no}. ${cat.label} (${count})`}
+                          sx={{ fontWeight: 900, textTransform: 'none' }}
                         />
-                      </ButtonBase>
-                    );
-                  })}
-                </Box>
+                      );
+                    })}
+                  </Tabs>
+                ) : null}
+
+                {navStep === 'subcategory' && vehicleTypeFilter !== 'trailer' ? (
+                  <Tabs
+                    value={activeSubcategoryKey}
+                    onChange={(_, newSubKey) => {
+                      setActiveSubcategoryKey(newSubKey);
+                      setNavStep('worktimes');
+                    }}
+                    variant="scrollable"
+                    scrollButtons="auto"
+                    allowScrollButtonsMobile
+                    sx={{ minHeight: 42 }}
+                  >
+                    {subcategoriesWithLegacy.map((sub) => (
+                      <Tab
+                        key={sub.key}
+                        value={sub.key}
+                        label={sub.key === '__legacy__' ? String(sub.label) : `${sub.no}. ${sub.label}`}
+                        sx={{ fontWeight: 900, textTransform: 'none' }}
+                      />
+                    ))}
+                  </Tabs>
+                ) : null}
+
+                {navStep === 'worktimes' ? (
+                  <Box sx={{ mt: 0.5 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 900 }}>
+                      {vehicleTypeFilter === 'trailer'
+                        ? `Група: ${formatCategoryLabel(vehicleTypeFilter, activeCategoryKey)}`
+                        : `Група: ${formatCategoryLabel(vehicleTypeFilter, activeCategoryKey)} / Подгрупа: ${
+                            activeSubcategoryKey === '__legacy__'
+                              ? 'Неразпределени (стар тип)'
+                              : activeSubcategoryKey
+                          }`}
+                    </Typography>
+                  </Box>
+                ) : null}
               </Box>
 
-              {/* Truck subcategory list (screenshot-style list with chevron) */}
-              {vehicleTypeFilter !== 'trailer' && subcategoriesWithLegacy.length > 0 ? (
-                <Box sx={{ mt: 1.25 }}>
-                  <Paper
-                    variant="outlined"
-                    sx={{
-                      borderRadius: 2,
-                      overflow: 'hidden',
-                    }}
-                  >
-                    <List dense sx={{ p: 0 }}>
-                      {subcategoriesWithLegacy.map((sub, idx) => {
-                        const isSelected = activeSubcategoryKey === sub.key;
-                        return (
-                          <div key={sub.key}>
-                            <ListItem
-                              disablePadding
-                              selected={isSelected}
-                              onClick={() => setActiveSubcategoryKey(sub.key)}
-                              sx={{ cursor: 'pointer' }}
-                            >
-                              <ListItemText
-                                primary={
-                                  sub.key === '__legacy__'
-                                    ? String(sub.label)
-                                    : `${sub.no}. ${sub.label}`
-                                }
-                                primaryTypographyProps={{
-                                  sx: {
-                                    fontWeight: 800,
-                                    // Match screenshot: single line with ellipsis
-                                    whiteSpace: 'nowrap',
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                  },
-                                }}
-                                sx={{ px: 1.5, py: 0.75 }}
-                              />
-                              <Box sx={{ pr: 1.25, color: 'text.secondary', fontWeight: 900 }}>
-                                »
-                              </Box>
-                            </ListItem>
-                            {idx < subcategoriesWithLegacy.length - 1 ? <Divider /> : null}
-                          </div>
-                        );
-                      })}
-                    </List>
-                  </Paper>
-                </Box>
-              ) : null}
-
+              {navStep === 'worktimes' ? (
               <Box sx={{ mt: 2 }}>
                 <Box
                   sx={{
@@ -761,6 +665,7 @@ export default function Worktimes({ t }) {
                   )}
                 </List>
               </Box>
+              ) : null}
             </CardContent>
           </Card>
         </Grid>
