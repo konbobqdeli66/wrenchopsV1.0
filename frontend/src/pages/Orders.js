@@ -157,6 +157,20 @@ export default function Orders({ t }) {
     return [...base, { key: '__legacy__', no: '—', label: 'Неразпределени (стар тип)' }];
   }, [orderVehicleType, selectionSubcategories, hasLegacyWorktimesInSelectedCategory]);
 
+  const countBySelectionSubcategoryKey = useMemo(() => {
+    const map = {};
+    if (orderVehicleType === 'trailer') return map;
+
+    (availableWorktimes || []).forEach((w) => {
+      if (getWorktimeCategoryKey(w, orderVehicleType) !== worktimeCategoryKey) return;
+      const subKey = getWorktimeSubcategoryKey(w, orderVehicleType);
+      const key = subKey ? subKey : '__legacy__';
+      map[key] = (map[key] || 0) + 1;
+    });
+
+    return map;
+  }, [availableWorktimes, orderVehicleType, worktimeCategoryKey]);
+
   const filteredAvailableWorktimes = useMemo(() => {
     const q = String(worktimeSearch || '').trim().toLowerCase();
     const list = Array.isArray(availableWorktimes) ? availableWorktimes : [];
@@ -1350,6 +1364,7 @@ export default function Orders({ t }) {
               >
                 {selectionSubcategoriesWithLegacy.map((sub) => {
                   const isActive = worktimeSubcategoryKey === sub.key;
+                  const count = countBySelectionSubcategoryKey[sub.key] || 0;
                   return (
                     <Card
                       key={sub.key}
@@ -1369,12 +1384,22 @@ export default function Orders({ t }) {
                         }}
                         sx={{ p: 1.25 }}
                       >
-                        <Typography sx={{ fontWeight: 900 }} title={sub.label}>
-                          {sub.key === '__legacy__' ? String(sub.label) : `${sub.no}. ${sub.label}`}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
-                          Подгрупа
-                        </Typography>
+                        <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 1 }}>
+                          <Box sx={{ minWidth: 0 }}>
+                            <Typography sx={{ fontWeight: 900 }} title={sub.label}>
+                              {sub.key === '__legacy__' ? String(sub.label) : `${sub.no}. ${sub.label}`}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
+                              Подгрупа
+                            </Typography>
+                          </Box>
+                          <Chip
+                            label={count}
+                            size="small"
+                            color="primary"
+                            sx={{ fontWeight: 900, flexShrink: 0 }}
+                          />
+                        </Box>
                       </CardActionArea>
                     </Card>
                   );
