@@ -213,7 +213,6 @@ router.post('/setup-admin', async (req, res) => {
         { module: 'orders', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
         { module: 'invoices', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
         { module: 'worktimes', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
-        { module: 'packages', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
         { module: 'vehicles', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 },
         { module: 'admin', can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 }
       ];

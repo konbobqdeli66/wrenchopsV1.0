@@ -19,7 +19,6 @@ import {
   InputAdornment,
   IconButton,
   useMediaQuery,
-  FormControlLabel,
   FormControl,
   Select,
   MenuItem,
@@ -30,11 +29,7 @@ import {
   DialogActions,
   Paper,
   Fab,
-  Stack,
-  Switch,
-  ToggleButton,
-  ToggleButtonGroup,
-  Tooltip
+  Stack
 } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
 import AddTaskIcon from "@mui/icons-material/AddTask";
@@ -47,7 +42,6 @@ import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
 import StickyNote2Icon from "@mui/icons-material/StickyNote2";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
-import PaidIcon from "@mui/icons-material/Paid";
 import { getApiBaseUrl } from "../api";
 import {
   formatCategoryLabel,
@@ -57,7 +51,7 @@ import {
   getWorktimeSubcategoryKey,
 } from "../utils/worktimeClassification";
 
-export default function Orders({ t, userRole = 'user', userPermissions = [] }) {
+export default function Orders({ t }) {
   const [orders, setOrders] = useState([]);
   const [search, setSearch] = useState("");
   const [form, setForm] = useState({
@@ -73,28 +67,6 @@ export default function Orders({ t, userRole = 'user', userPermissions = [] }) {
   const [orderWorktimes, setOrderWorktimes] = useState([]);
   const [availableWorktimes, setAvailableWorktimes] = useState([]);
   const [worktimeSelectionOpen, setWorktimeSelectionOpen] = useState(false);
-
-  // --- Packages (fixed-price operations) ---
-  const [orderPackages, setOrderPackages] = useState([]);
-  const [availablePackages, setAvailablePackages] = useState([]);
-  const [packageSelectionOpen, setPackageSelectionOpen] = useState(false);
-  const [packageSearch, setPackageSearch] = useState('');
-  const [packageForm, setPackageForm] = useState({
-    quantity: 1,
-    notes: '',
-    price: '',
-    is_price_correction: 0,
-  });
-  const [selectedPackageToAdd, setSelectedPackageToAdd] = useState(null);
-  const [packagePriceDialogOpen, setPackagePriceDialogOpen] = useState(false);
-
-  // Order package details/edit
-  const [packageDetailsOpen, setPackageDetailsOpen] = useState(false);
-  const [selectedOrderPackage, setSelectedOrderPackage] = useState(null);
-  const [packageEditDraft, setPackageEditDraft] = useState({ quantity: 1, notes: '', price: '', is_price_correction: 0 });
-
-  // Work card add-mode
-  const [addMode, setAddMode] = useState('worktimes'); // 'worktimes' | 'packages'
   const [orderVehicleType, setOrderVehicleType] = useState('truck');
   const [worktimeCategoryKey, setWorktimeCategoryKey] = useState('regular');
   const [worktimeSubcategoryKey, setWorktimeSubcategoryKey] = useState('');
@@ -133,27 +105,6 @@ export default function Orders({ t, userRole = 'user', userPermissions = [] }) {
   const isDesktop = useMediaQuery('(min-width:900px)');
   const isMobile = useMediaQuery('(max-width:600px)');
   const fullScreenDialog = isDesktop || isMobile;
-
-  const canAccessModule = (moduleKey) => {
-    if (userRole === 'admin') return true;
-    const perms = Array.isArray(userPermissions) ? userPermissions : [];
-    const p = perms.find((x) => x.module === moduleKey);
-    return Number(p?.can_access_module) === 1 && Number(p?.can_read) === 1;
-  };
-
-  const canUseWorktimes = canAccessModule('worktimes');
-  const canUsePackages = canAccessModule('packages');
-
-  // Ensure the currently selected add-mode is always permitted.
-  useEffect(() => {
-    if (addMode === 'worktimes' && !canUseWorktimes && canUsePackages) {
-      setAddMode('packages');
-      return;
-    }
-    if (addMode === 'packages' && !canUsePackages && canUseWorktimes) {
-      setAddMode('worktimes');
-    }
-  }, [addMode, canUseWorktimes, canUsePackages]);
 
   // Higher-contrast, no-gradients UI tokens (used in the Work Order / Order Details dialog)
   const hcDialogTitleSx = {
@@ -322,17 +273,6 @@ export default function Orders({ t, userRole = 'user', userPermissions = [] }) {
     0
   );
 
-  // Packages statistics
-  const totalPackagesCount = orderPackages.length;
-  // Note: kept for future UI KPIs.
-  // const totalPackagesQuantity = orderPackages.reduce((sum, op) => sum + (Number(op?.quantity) || 0), 0);
-  const totalPackagesHours = orderPackages.reduce(
-    (sum, op) => sum + (Number(op?.hours) || 0) * (Number(op?.quantity) || 0),
-    0
-  );
-
-  const totalAllHours = totalWorktimesHours + totalPackagesHours;
-
   // UI helper: if there are legacy duplicates (same operation + same hours) with NO notes,
   // collapse them into one row by increasing the quantity.
   const displayedOrderWorktimes = useMemo(() => {
@@ -405,9 +345,6 @@ export default function Orders({ t, userRole = 'user', userPermissions = [] }) {
 
     loadOrderWorktimes(order.id);
     loadAvailableWorktimes();
-    loadOrderPackages(order.id);
-    loadAvailablePackages();
-    setAddMode(canUseWorktimes ? 'worktimes' : (canUsePackages ? 'packages' : 'worktimes'));
     setOrderDetailsOpen(true);
   };
 
@@ -432,28 +369,11 @@ export default function Orders({ t, userRole = 'user', userPermissions = [] }) {
   }
 
   async function loadAvailableWorktimes() {
-    if (!canUseWorktimes) {
-      setAvailableWorktimes([]);
-      return;
-    }
     try {
       const res = await axios.get(`${getApiBaseUrl()}/worktimes`);
       setAvailableWorktimes(res.data);
     } catch (error) {
       setAvailableWorktimes([]);
-    }
-  }
-
-  async function loadAvailablePackages() {
-    if (!canUsePackages) {
-      setAvailablePackages([]);
-      return;
-    }
-    try {
-      const res = await axios.get(`${getApiBaseUrl()}/packages`);
-      setAvailablePackages(res.data);
-    } catch (error) {
-      setAvailablePackages([]);
     }
   }
 
@@ -482,28 +402,11 @@ export default function Orders({ t, userRole = 'user', userPermissions = [] }) {
   }, [orderVehicleType, worktimeCategoryKey, worktimeSubcategoryKey]);
 
   async function loadOrderWorktimes(orderId) {
-    if (!canUseWorktimes) {
-      setOrderWorktimes([]);
-      return;
-    }
     try {
       const res = await axios.get(`${getApiBaseUrl()}/orders/${orderId}/worktimes`);
       setOrderWorktimes(res.data);
     } catch (error) {
       setOrderWorktimes([]);
-    }
-  }
-
-  async function loadOrderPackages(orderId) {
-    if (!canUsePackages) {
-      setOrderPackages([]);
-      return;
-    }
-    try {
-      const res = await axios.get(`${getApiBaseUrl()}/orders/${orderId}/packages`);
-      setOrderPackages(res.data);
-    } catch (error) {
-      setOrderPackages([]);
     }
   }
 
@@ -516,24 +419,15 @@ export default function Orders({ t, userRole = 'user', userPermissions = [] }) {
     }
   }
 
-  async function removePackageFromOrder(orderPackageId) {
-    try {
-      await axios.delete(`${getApiBaseUrl()}/orders/packages/${orderPackageId}`);
-      loadOrderPackages(selectedOrder.id);
-    } catch (error) {
-      alert('Грешка при премахване на пакетна операция');
-    }
-  }
-
   const handleWorktimeSelect = (worktime) => {
-    if (!canUseWorktimes) return;
-    // Auto-add the worktime, but keep the picker open so multiple items can be added quickly.
-    addWorktimeToOrderWithDefaults(worktime, { keepPickerOpen: true });
+    setWorktimeSelectionOpen(false);
+    setWorktimeNavStep('category');
+    setWorktimeSearch('');
+    // Auto-add the worktime with default quantity
+    addWorktimeToOrderWithDefaults(worktime);
   };
 
-  async function addWorktimeToOrderWithDefaults(worktime, options = {}) {
-    if (!canUseWorktimes) return;
-    const { keepPickerOpen = false } = options;
+  async function addWorktimeToOrderWithDefaults(worktime) {
     try {
       await axios.post(`${getApiBaseUrl()}/orders/${selectedOrder.id}/worktimes`, {
         worktime_id: worktime.id,
@@ -541,86 +435,10 @@ export default function Orders({ t, userRole = 'user', userPermissions = [] }) {
         notes: worktimeForm.notes
       });
       loadOrderWorktimes(selectedOrder.id);
-
-      // Keep quantity for rapid adding, but clear notes so they don't accidentally carry over.
-      setWorktimeForm({ worktime_id: "", quantity: worktimeForm.quantity, notes: "" });
-
-      if (!keepPickerOpen) {
-        setWorktimeSelectionOpen(false);
-        setWorktimeNavStep('category');
-        setWorktimeSearch('');
-      }
+      setWorktimeForm({ worktime_id: "", quantity: 1, notes: "" });
+      setWorktimeSelectionOpen(false);
     } catch (error) {
       alert('Грешка при добавяне на нормовреме');
-    }
-  }
-
-  // --- Packages flow ---
-  const handlePackageSelect = (pkg) => {
-    if (!canUsePackages) return;
-    setSelectedPackageToAdd(pkg);
-    const defaultUnitPrice = Number(pkg?.last_invoiced_price) || 0;
-    setPackageForm((prev) => ({
-      ...prev,
-      price: String(defaultUnitPrice.toFixed(2)),
-      is_price_correction: 0,
-    }));
-    setPackagePriceDialogOpen(true);
-  };
-
-  async function addPackageToOrderWithDefaults(pkg) {
-    if (!canUsePackages) return;
-    try {
-      const unitPrice = Number(String(packageForm.price ?? '').replace(',', '.'));
-      await axios.post(`${getApiBaseUrl()}/orders/${selectedOrder.id}/packages`, {
-        package_id: pkg.id,
-        quantity: Math.max(1, parseInt(packageForm.quantity, 10) || 1),
-        notes: String(packageForm.notes || ''),
-        price: Number.isFinite(unitPrice) ? unitPrice : 0,
-        is_price_correction: Number(packageForm.is_price_correction) === 1 ? 1 : 0,
-      });
-      loadOrderPackages(selectedOrder.id);
-      setPackagePriceDialogOpen(false);
-      setPackageSelectionOpen(false);
-      setSelectedPackageToAdd(null);
-      setPackageSearch('');
-      setPackageForm({ quantity: 1, notes: '', price: '', is_price_correction: 0 });
-    } catch (error) {
-      alert('Грешка при добавяне на пакетна операция');
-    }
-  }
-
-  const openOrderPackageDetails = (op) => {
-    if (!canUsePackages) return;
-    setSelectedOrderPackage(op);
-    setPackageEditDraft({
-      quantity: Number(op?.quantity) || 1,
-      notes: String(op?.notes || ''),
-      price: String(op?.price ?? ''),
-      is_price_correction: Number(op?.is_price_correction) === 1 ? 1 : 0,
-    });
-    setPackageDetailsOpen(true);
-  };
-
-  async function saveOrderPackageEdits() {
-    if (!canUsePackages) return;
-    if (!selectedOrder?.id || !selectedOrderPackage?.id) return;
-    try {
-      const unitPrice = Number(String(packageEditDraft.price ?? '').replace(',', '.'));
-      const res = await axios.put(
-        `${getApiBaseUrl()}/orders/${selectedOrder.id}/packages/${selectedOrderPackage.id}`,
-        {
-          quantity: Math.max(1, parseInt(packageEditDraft.quantity, 10) || 1),
-          notes: String(packageEditDraft.notes || ''),
-          price: Number.isFinite(unitPrice) ? unitPrice : 0,
-          is_price_correction: Number(packageEditDraft.is_price_correction) === 1 ? 1 : 0,
-        }
-      );
-      const updated = res.data;
-      setSelectedOrderPackage(updated);
-      setOrderPackages((prev) => (Array.isArray(prev) ? prev.map((x) => (x.id === updated.id ? updated : x)) : prev));
-    } catch (error) {
-      alert('Грешка при запис на пакетната операция');
     }
   }
 
@@ -1126,7 +944,7 @@ export default function Orders({ t, userRole = 'user', userPermissions = [] }) {
                       </Typography>
                     </Box>
                     <Box sx={hcKpiBoxSx}>
-                      <Typography variant="h5" sx={{ fontWeight: 900 }}>{totalAllHours.toFixed(2).replace(/\.00$/, '')}ч</Typography>
+                      <Typography variant="h5" sx={{ fontWeight: 900 }}>{totalWorktimesHours.toFixed(2).replace(/\.00$/, '')}ч</Typography>
                       <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
                         Общо време
                       </Typography>
@@ -1161,218 +979,102 @@ export default function Orders({ t, userRole = 'user', userPermissions = [] }) {
             </Box>
           )}
 
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }} sx={{ mb: 1.25 }}>
-            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap' }}>
-              <Typography variant={isMobile ? 'subtitle1' : 'h6'} sx={{ fontWeight: 900 }}>
-                Добавени позиции
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 800 }}>
-                ({addMode === 'worktimes' ? displayedOrderWorktimes.length : totalPackagesCount})
-              </Typography>
-            </Box>
-
-            <Box sx={{ flexGrow: 1 }} />
-
-            <ToggleButtonGroup
-              value={addMode}
-              exclusive
-              onChange={(_, val) => {
-                if (!val) return;
-                setAddMode(val);
-              }}
-              size={isMobile ? 'small' : 'medium'}
-            >
-              <ToggleButton value="worktimes" disabled={!canUseWorktimes}>Нормовремена</ToggleButton>
-              <ToggleButton value="packages" disabled={!canUsePackages}>Пакетни операции</ToggleButton>
-            </ToggleButtonGroup>
+          <Stack direction="row" spacing={1} alignItems="baseline" sx={{ mb: 1.25 }}>
+            <Typography variant={isMobile ? 'subtitle1' : 'h6'} sx={{ fontWeight: 900 }}>
+              Добавени нормовремена
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 800 }}>
+              ({displayedOrderWorktimes.length})
+            </Typography>
           </Stack>
-
-          {addMode === 'worktimes' ? (
-            displayedOrderWorktimes.length > 0 ? (
-              <List dense sx={{ p: 0 }}>
-                {displayedOrderWorktimes.map((ow, index) => {
-                  const totalHours = (ow.hours || 0) * (ow.quantity || 0);
-                  return (
-                    <div key={ow.id}>
-                      <ListItem
-                        disablePadding
-                        sx={{
-                          borderRadius: 2,
-                          overflow: 'hidden',
-                          mb: 0.75,
-                          border: (theme) =>
-                            ow.notes
-                              ? `2px solid ${theme.palette.warning.main}`
-                              : `1px solid ${theme.palette.divider}`,
-                        }}
-                      >
-                        <ListItemText
-                          onClick={() => openOrderWorktimeDetails(ow)}
-                          primary={
-                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
-                              <Typography sx={{ fontWeight: 700, fontSize: '0.95rem' }}>
-                                {ow.worktime_title}
-                              </Typography>
+          {displayedOrderWorktimes.length > 0 ? (
+            <List dense sx={{ p: 0 }}>
+              {displayedOrderWorktimes.map((ow, index) => {
+                const totalHours = (ow.hours || 0) * (ow.quantity || 0);
+                return (
+                  <div key={ow.id}>
+                    <ListItem
+                      disablePadding
+                      sx={{
+                        borderRadius: 2,
+                        overflow: 'hidden',
+                        mb: 0.75,
+                        border: (theme) =>
+                          ow.notes
+                            ? `2px solid ${theme.palette.warning.main}`
+                            : `1px solid ${theme.palette.divider}`,
+                      }}
+                    >
+                      <ListItemText
+                        onClick={() => openOrderWorktimeDetails(ow)}
+                        primary={
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                            <Typography sx={{ fontWeight: 700, fontSize: '0.95rem' }}>
+                              {ow.worktime_title}
+                            </Typography>
+                            <Chip
+                              label={`${totalHours.toFixed(2).replace(/\.00$/, '')}ч`}
+                              size="small"
+                              color="primary"
+                              sx={{ fontWeight: 800 }}
+                            />
+                          </Box>
+                        }
+                        secondary={
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, mt: 0.25 }}>
+                            <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', alignItems: 'center' }}>
+                              <Chip label={ow.component_type} size="small" variant="outlined" />
                               <Chip
-                                label={`${totalHours.toFixed(2).replace(/\.00$/, '')}ч`}
+                                label={formatCategoryLabel(orderVehicleType, ow.component_type)}
                                 size="small"
-                                color="primary"
-                                sx={{ fontWeight: 800 }}
+                                variant="outlined"
                               />
-                            </Box>
-                          }
-                          secondary={
-                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, mt: 0.25 }}>
-                              <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', alignItems: 'center' }}>
-                                <Chip label={ow.component_type} size="small" variant="outlined" />
-                                <Chip
-                                  label={formatCategoryLabel(orderVehicleType, ow.component_type)}
-                                  size="small"
-                                  variant="outlined"
+                              <Chip label={`${ow.hours}ч`} size="small" variant="outlined" />
+                              <Chip label={`x${ow.quantity}`} size="small" variant="outlined" />
+                              {ow.notes ? (
+                                <StickyNote2Icon
+                                  titleAccess="Има бележка"
+                                  sx={{ color: 'warning.main', fontSize: 18 }}
                                 />
-                                <Chip label={`${ow.hours}ч`} size="small" variant="outlined" />
-                                <Chip label={`x${ow.quantity}`} size="small" variant="outlined" />
-                                {ow.notes ? (
-                                  <StickyNote2Icon
-                                    titleAccess="Има бележка"
-                                    sx={{ color: 'warning.main', fontSize: 18 }}
-                                  />
-                                ) : null}
-                              </Box>
-                              <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-                                Натисни за детайли
-                              </Typography>
+                              ) : null}
                             </Box>
-                          }
-                          sx={{
-                            cursor: 'pointer',
-                            px: 1.25,
-                            py: 0.75,
-                            '&:hover': { backgroundColor: 'action.hover' },
-                          }}
-                        />
-                      </ListItem>
-                      {index < displayedOrderWorktimes.length - 1 && <Divider sx={{ my: 0.25 }} />}
-                    </div>
-                  );
-                })}
-              </List>
-            ) : (
-              <Paper
-                variant="outlined"
-                sx={{
-                  p: { xs: 2, sm: 3 },
-                  textAlign: 'center',
-                  border: (theme) => `2px dashed ${theme.palette.divider}`,
-                  borderRadius: 2,
-                  backgroundColor: (theme) => theme.palette.background.default,
-                }}
-              >
-                <Typography variant="subtitle1" sx={{ fontWeight: 900, mb: 0.75 }}>
-                  Няма добавени нормовремена
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 700 }}>
-                  Използвайте бутона "+" за да добавите нормовреме към поръчката.
-                </Typography>
-              </Paper>
-            )
-          ) : null}
-
-          {addMode === 'packages' ? (
-            orderPackages.length > 0 ? (
-              <List dense sx={{ p: 0 }}>
-                {orderPackages.map((op, index) => {
-                  const hoursTotal = (Number(op?.hours) || 0) * (Number(op?.quantity) || 0);
-                  const amountTotal = (Number(op?.price) || 0) * (Number(op?.quantity) || 0);
-                  const hasNote = Boolean(String(op?.notes || '').trim());
-                  const priceIsCorrection = Number(op?.is_price_correction) === 1;
-                  return (
-                    <div key={op.id}>
-                      <ListItem
-                        disablePadding
+                            <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                              Натисни за детайли
+                            </Typography>
+                          </Box>
+                        }
                         sx={{
-                          borderRadius: 2,
-                          overflow: 'hidden',
-                          mb: 0.75,
-                          border: (theme) =>
-                            hasNote || priceIsCorrection
-                              ? `2px solid ${theme.palette.warning.main}`
-                              : `1px solid ${theme.palette.divider}`,
+                          cursor: 'pointer',
+                          px: 1.25,
+                          py: 0.75,
+                          '&:hover': { backgroundColor: 'action.hover' },
                         }}
-                      >
-                        <ListItemText
-                          onClick={() => openOrderPackageDetails(op)}
-                          primary={
-                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
-                              <Typography sx={{ fontWeight: 700, fontSize: '0.95rem' }}>
-                                {op.package_title}
-                              </Typography>
-                              <Chip
-                                label={`${amountTotal.toFixed(2)} лв`}
-                                size="small"
-                                color="primary"
-                                sx={{ fontWeight: 900 }}
-                              />
-                            </Box>
-                          }
-                          secondary={
-                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, mt: 0.25 }}>
-                              <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', alignItems: 'center' }}>
-                                <Chip label={`${Number(op?.hours || 0).toFixed(2).replace(/\.00$/, '')}ч`} size="small" variant="outlined" />
-                                <Chip label={`x${op.quantity}`} size="small" variant="outlined" />
-                                <Chip label={`${hoursTotal.toFixed(2).replace(/\.00$/, '')}ч общо`} size="small" variant="outlined" />
-                                <Chip
-                                  label={`${Number(op?.price || 0).toFixed(2)} лв/бр`}
-                                  size="small"
-                                  color="warning"
-                                  variant="outlined"
-                                  sx={{ fontWeight: 900 }}
-                                />
-                                {priceIsCorrection ? (
-                                  <Chip label="Корекция" size="small" color="warning" variant="filled" sx={{ fontWeight: 900 }} />
-                                ) : null}
-                                {hasNote ? (
-                                  <StickyNote2Icon titleAccess="Има бележка" sx={{ color: 'warning.main', fontSize: 18 }} />
-                                ) : null}
-                              </Box>
-                              <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-                                Натисни за детайли
-                              </Typography>
-                            </Box>
-                          }
-                          sx={{
-                            cursor: 'pointer',
-                            px: 1.25,
-                            py: 0.75,
-                            '&:hover': { backgroundColor: 'action.hover' },
-                          }}
-                        />
-                      </ListItem>
-                      {index < orderPackages.length - 1 && <Divider sx={{ my: 0.25 }} />}
-                    </div>
-                  );
-                })}
-              </List>
-            ) : (
-              <Paper
-                variant="outlined"
-                sx={{
-                  p: { xs: 2, sm: 3 },
-                  textAlign: 'center',
-                  border: (theme) => `2px dashed ${theme.palette.divider}`,
-                  borderRadius: 2,
-                  backgroundColor: (theme) => theme.palette.background.default,
-                }}
-              >
-                <Typography variant="subtitle1" sx={{ fontWeight: 900, mb: 0.75 }}>
-                  Няма добавени пакетни операции
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 700 }}>
-                  Използвайте бутона "+" за да добавите пакетна операция към поръчката.
-                </Typography>
-              </Paper>
-            )
-          ) : null}
+                      />
+                    </ListItem>
+                    {index < displayedOrderWorktimes.length - 1 && <Divider sx={{ my: 0.25 }} />}
+                  </div>
+                );
+              })}
+            </List>
+          ) : (
+            <Paper
+              variant="outlined"
+              sx={{
+                p: { xs: 2, sm: 3 },
+                textAlign: 'center',
+                border: (theme) => `2px dashed ${theme.palette.divider}`,
+                borderRadius: 2,
+                backgroundColor: (theme) => theme.palette.background.default,
+              }}
+            >
+              <Typography variant="subtitle1" sx={{ fontWeight: 900, mb: 0.75 }}>
+                Няма добавени нормовремена
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 700 }}>
+                Използвайте бутона "+" за да добавите нормовреме към поръчката.
+              </Typography>
+            </Paper>
+          )}
         </DialogContent>
         <DialogActions sx={{
           p: { xs: 1.25, sm: 2 },
@@ -1404,13 +1106,6 @@ export default function Orders({ t, userRole = 'user', userPermissions = [] }) {
           color="primary"
           aria-label="add worktime"
           onClick={() => {
-            if (addMode === 'packages') {
-              setPackageSearch('');
-              setPackageForm({ quantity: 1, notes: '', price: '', is_price_correction: 0 });
-              setSelectedPackageToAdd(null);
-              setPackageSelectionOpen(true);
-              return;
-            }
             setWorktimeNavStep('category');
             setWorktimeSearch('');
             setWorktimeSelectionOpen(true);
@@ -1426,106 +1121,6 @@ export default function Orders({ t, userRole = 'user', userPermissions = [] }) {
         >
           <AddIcon />
         </Fab>
-      </Dialog>
-
-      {/* Popup: full details for a selected added package */}
-      <Dialog
-        open={packageDetailsOpen}
-        onClose={() => setPackageDetailsOpen(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <PaidIcon color="warning" />
-            <Typography sx={{ fontWeight: 800 }}>
-              {selectedOrderPackage?.package_title}
-            </Typography>
-          </Box>
-          <IconButton onClick={() => setPackageDetailsOpen(false)} aria-label="Close">
-            <ArrowBackIcon />
-          </IconButton>
-        </DialogTitle>
-        <DialogContent>
-          {selectedOrderPackage ? (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                <Chip label={`${Number(selectedOrderPackage?.hours || 0).toFixed(2).replace(/\.00$/, '')}ч/бр`} size="small" variant="outlined" />
-                <Chip label={`x${selectedOrderPackage?.quantity || 0}`} size="small" variant="outlined" />
-                <Chip
-                  label={`${(Number(selectedOrderPackage?.price || 0) * Number(selectedOrderPackage?.quantity || 0)).toFixed(2)} лв`}
-                  size="small"
-                  color="primary"
-                  sx={{ fontWeight: 900 }}
-                />
-                {Number(selectedOrderPackage?.is_price_correction) === 1 ? (
-                  <Chip label="Корекция" size="small" color="warning" sx={{ fontWeight: 900 }} />
-                ) : null}
-              </Box>
-
-              <Grid container spacing={2}>
-                <Grid item xs={6}>
-                  <TextField
-                    fullWidth
-                    label="Количество"
-                    type="number"
-                    size="small"
-                    value={packageEditDraft.quantity}
-                    onChange={(e) => setPackageEditDraft((p) => ({ ...p, quantity: parseInt(e.target.value, 10) || 1 }))}
-                    inputProps={{ min: 1 }}
-                  />
-                </Grid>
-                <Grid item xs={6}>
-                  <TextField
-                    fullWidth
-                    label="Цена (лв/бр)"
-                    size="small"
-                    value={packageEditDraft.price}
-                    onChange={(e) => setPackageEditDraft((p) => ({ ...p, price: e.target.value }))}
-                  />
-                </Grid>
-                <Grid item xs={12}>
-                  <TextField
-                    fullWidth
-                    label="Бележки"
-                    size="small"
-                    value={packageEditDraft.notes}
-                    onChange={(e) => setPackageEditDraft((p) => ({ ...p, notes: e.target.value }))}
-                    multiline
-                    minRows={3}
-                  />
-                </Grid>
-              </Grid>
-
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={Number(packageEditDraft.is_price_correction) === 1}
-                    onChange={(e) => setPackageEditDraft((p) => ({ ...p, is_price_correction: e.target.checked ? 1 : 0 }))}
-                  />
-                }
-                label="Корекция на цена (ако е по-ниска от последната фактура)"
-              />
-            </Box>
-          ) : null}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={saveOrderPackageEdits} disabled={!selectedOrderPackage} variant="outlined" startIcon={<EditIcon />}>
-            Запази
-          </Button>
-          <Button
-            onClick={() => {
-              if (!selectedOrderPackage) return;
-              removePackageFromOrder(selectedOrderPackage.id);
-              setPackageDetailsOpen(false);
-            }}
-            color="error"
-            startIcon={<DeleteIcon />}
-            disabled={!selectedOrderPackage}
-          >
-            Премахни
-          </Button>
-        </DialogActions>
       </Dialog>
 
       {/* Popup: full details for a selected added worktime */}
@@ -1598,257 +1193,6 @@ export default function Orders({ t, userRole = 'user', userPermissions = [] }) {
             disabled={!selectedOrderWorktime}
           >
             Премахни
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Package Selection Modal */}
-      <Dialog
-        open={packageSelectionOpen}
-        onClose={() => setPackageSelectionOpen(false)}
-        maxWidth="lg"
-        fullWidth
-        fullScreen={fullScreenDialog}
-        sx={{
-          '& .MuiDialog-paper': {
-            border: (theme) => `3px solid ${theme.palette.mode === 'dark' ? '#555' : '#333'}`,
-            borderRadius: 2,
-            boxShadow: (theme) => theme.palette.mode === 'dark'
-              ? '0 8px 32px rgba(0,0,0,0.6)'
-              : '0 8px 32px rgba(0,0,0,0.3)',
-          }
-        }}
-      >
-        <DialogTitle sx={hcDialogTitleSx}>
-          <Box sx={{ width: 40 }} />
-          <AddIcon sx={{ fontSize: '1.5rem' }} />
-          Избери пакетна операция за добавяне
-        </DialogTitle>
-        <DialogContent sx={{ p: 3 }}>
-          <Box sx={{ mb: 2 }}>
-            <TextField
-              fullWidth
-              placeholder="Търси пакетна операция..."
-              value={packageSearch}
-              onChange={(e) => setPackageSearch(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon sx={{ color: (theme) => theme.palette.primary.main }} />
-                  </InputAdornment>
-                ),
-              }}
-            />
-          </Box>
-
-          <Box sx={{ mb: 2, p: 2, border: 1, borderColor: 'divider', borderRadius: 1 }}>
-            <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 'bold' }}>
-              Настройки за добавяне:
-            </Typography>
-            <Grid container spacing={2}>
-              <Grid item xs={6}>
-                <TextField
-                  fullWidth
-                  label="Количество"
-                  type="number"
-                  value={packageForm.quantity}
-                  onChange={(e) => setPackageForm((p) => ({ ...p, quantity: parseInt(e.target.value, 10) || 1 }))}
-                  inputProps={{ min: 1 }}
-                  size="small"
-                />
-              </Grid>
-              <Grid item xs={6}>
-                <TextField
-                  fullWidth
-                  label="Бележки"
-                  value={packageForm.notes}
-                  onChange={(e) => setPackageForm((p) => ({ ...p, notes: e.target.value }))}
-                  size="small"
-                />
-              </Grid>
-            </Grid>
-          </Box>
-
-          <List sx={{ p: 0 }}>
-            {(Array.isArray(availablePackages) ? availablePackages : [])
-              .filter((p) => {
-                const q = String(packageSearch || '').trim().toLowerCase();
-                if (!q) return true;
-                return String(p?.title || '').toLowerCase().includes(q);
-              })
-              .map((pkg, index, arr) => {
-                const lastPrice = Number(pkg?.last_invoiced_price) || 0;
-                const lastAt = String(pkg?.last_invoiced_at || '').trim();
-                const lastAtBg = lastAt ? new Date(String(lastAt).replace(' ', 'T')).toLocaleDateString('bg-BG') : '';
-
-                return (
-                  <div key={pkg.id}>
-                    <ListItem
-                      alignItems="flex-start"
-                      button
-                      onClick={() => handlePackageSelect(pkg)}
-                      sx={{
-                        cursor: 'pointer',
-                        borderRadius: 2,
-                        mb: 1.25,
-                        border: (theme) => `2px solid ${theme.palette.mode === 'dark' ? '#555' : '#ccc'}`,
-                        backgroundColor: (theme) => theme.palette.mode === 'dark' ? '#333' : '#fff',
-                        padding: 2,
-                        '&:hover': {
-                          borderColor: (theme) => theme.palette.primary.main,
-                          transform: 'translateY(-1px)',
-                          boxShadow: (theme) => theme.palette.mode === 'dark'
-                            ? '0 6px 12px rgba(0,0,0,0.4)'
-                            : '0 6px 12px rgba(0,0,0,0.15)',
-                        },
-                      }}
-                    >
-                      <ListItemText
-                        primary={
-                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1, gap: 1 }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
-                              <PaidIcon color="warning" sx={{ fontSize: '1.5rem' }} />
-                              <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
-                                {pkg.title}
-                              </Typography>
-                            </Box>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
-                              <Chip label={`${Number(pkg.hours || 0).toFixed(2).replace(/\.00$/, '')} ч.`} size="small" variant="outlined" />
-                              <Tooltip
-                                title={lastAtBg ? `Последно фактуриране: ${lastAtBg}` : 'Няма фактуриране'}
-                                arrow
-                              >
-                                <Chip
-                                  label={`${lastPrice.toFixed(2)} лв.`}
-                                  size="small"
-                                  color="warning"
-                                  variant="outlined"
-                                  sx={{ fontWeight: 900 }}
-                                />
-                              </Tooltip>
-                            </Box>
-                          </Box>
-                        }
-                        secondary={
-                          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                            Натисни за избор и цена.
-                          </Typography>
-                        }
-                      />
-                    </ListItem>
-                    {index < arr.length - 1 ? <Divider sx={{ my: 0.5 }} /> : null}
-                  </div>
-                );
-              })}
-
-            {Array.isArray(availablePackages) && availablePackages.length === 0 ? (
-              <ListItem>
-                <ListItemText
-                  primary="Няма пакетни операции"
-                  secondary="Създайте ги от таб „Пакетни операции“"
-                />
-              </ListItem>
-            ) : null}
-          </List>
-        </DialogContent>
-        <DialogActions sx={{ p: 3, pt: 0 }}>
-          <Button onClick={() => setPackageSelectionOpen(false)} variant="outlined">
-            Отказ
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Package price dialog */}
-      <Dialog
-        open={packagePriceDialogOpen}
-        onClose={() => setPackagePriceDialogOpen(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle sx={{ fontWeight: 900, display: 'flex', alignItems: 'center', gap: 1 }}>
-          <PaidIcon color="warning" />
-          Цена на пакетна операция
-        </DialogTitle>
-        <DialogContent sx={{ pt: 2 }}>
-          {selectedPackageToAdd ? (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-              <Typography sx={{ fontWeight: 900 }}>{selectedPackageToAdd.title}</Typography>
-              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                <Chip label={`${Number(selectedPackageToAdd.hours || 0).toFixed(2).replace(/\.00$/, '')}ч`} size="small" variant="outlined" />
-                <Tooltip
-                  title={selectedPackageToAdd?.last_invoiced_at
-                    ? `Последно фактуриране: ${new Date(String(selectedPackageToAdd.last_invoiced_at).replace(' ', 'T')).toLocaleString('bg-BG')}`
-                    : 'Няма фактуриране'}
-                  arrow
-                >
-                  <Chip
-                    label={`${Number(selectedPackageToAdd?.last_invoiced_price || 0).toFixed(2)} лв (последна)`}
-                    size="small"
-                    color="warning"
-                    variant="outlined"
-                    sx={{ fontWeight: 900 }}
-                  />
-                </Tooltip>
-              </Box>
-
-              <Grid container spacing={2}>
-                <Grid item xs={6}>
-                  <TextField
-                    fullWidth
-                    label="Количество"
-                    type="number"
-                    size="small"
-                    value={packageForm.quantity}
-                    onChange={(e) => setPackageForm((p) => ({ ...p, quantity: parseInt(e.target.value, 10) || 1 }))}
-                    inputProps={{ min: 1 }}
-                  />
-                </Grid>
-                <Grid item xs={6}>
-                  <TextField
-                    fullWidth
-                    label="Цена (лв/бр)"
-                    size="small"
-                    value={packageForm.price}
-                    onChange={(e) => setPackageForm((p) => ({ ...p, price: e.target.value }))}
-                  />
-                </Grid>
-                <Grid item xs={12}>
-                  <TextField
-                    fullWidth
-                    label="Бележки"
-                    size="small"
-                    value={packageForm.notes}
-                    onChange={(e) => setPackageForm((p) => ({ ...p, notes: e.target.value }))}
-                    multiline
-                    minRows={3}
-                  />
-                </Grid>
-              </Grid>
-
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={Number(packageForm.is_price_correction) === 1}
-                    onChange={(e) => setPackageForm((p) => ({ ...p, is_price_correction: e.target.checked ? 1 : 0 }))}
-                  />
-                }
-                label="Корекция на цена (ако зададете по-ниска цена)"
-              />
-            </Box>
-          ) : null}
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setPackagePriceDialogOpen(false)}>Отказ</Button>
-          <Button
-            onClick={() => {
-              if (!selectedPackageToAdd) return;
-              addPackageToOrderWithDefaults(selectedPackageToAdd);
-            }}
-            variant="contained"
-            color="warning"
-            disabled={!selectedPackageToAdd}
-          >
-            Добави
           </Button>
         </DialogActions>
       </Dialog>
@@ -2144,8 +1488,7 @@ export default function Orders({ t, userRole = 'user', userPermissions = [] }) {
             />
 
             <Typography variant="body1" gutterBottom sx={{ mb: 2 }}>
-              Изберете нормовреме от списъка по-долу. То ще бъде добавено към поръчката, а прозорецът ще остане отворен,
-              за да добавяте и други позиции.
+              Изберете нормовреме от списъка по-долу. То ще бъде автоматично добавено към поръчката.
             </Typography>
 
             {/* Quantity and Notes Button */}

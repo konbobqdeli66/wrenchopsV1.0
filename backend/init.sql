@@ -121,32 +121,4 @@ CREATE TABLE IF NOT EXISTS order_worktimes (
     FOREIGN KEY (worktime_id) REFERENCES worktimes (id) ON DELETE CASCADE
 );
 
--- Package operations (fixed price + hours)
-CREATE TABLE IF NOT EXISTS packages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    hours REAL NOT NULL DEFAULT 0,
-    -- The latest invoiced unit price (BGN) for this package.
-    last_invoiced_price REAL NOT NULL DEFAULT 0,
-    last_invoiced_at TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
-);
-
--- Package operations attached to a work order.
--- Note: price is stored on the order row (snapshot) and does NOT change if the package catalog updates later.
-CREATE TABLE IF NOT EXISTS order_packages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    order_id INTEGER NOT NULL,
-    package_id INTEGER NOT NULL,
-    quantity INTEGER DEFAULT 1,
-    notes TEXT,
-    -- Unit price snapshot (BGN)
-    price REAL NOT NULL DEFAULT 0,
-    -- If 1, a lower invoiced price is treated as a manual correction and updates packages.last_invoiced_*.
-    is_price_correction INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (order_id) REFERENCES orders (id) ON DELETE CASCADE,
-    FOREIGN KEY (package_id) REFERENCES packages (id) ON DELETE CASCADE
-);
-
 -- Note: Schema only. Use a separate seed script for demo data.
