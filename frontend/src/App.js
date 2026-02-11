@@ -758,6 +758,26 @@ function MainApp() {
 
               <Box sx={{ flexGrow: 1 }} />
 
+              {/* Version label (top bar, desktop) */}
+              <Chip
+                size="small"
+                label={APP_VERSION_LABEL}
+                variant="outlined"
+                sx={{
+                  bgcolor: darkMode ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.35)',
+                  color: darkMode ? 'common.white' : 'common.black',
+                  fontWeight: 800,
+                  mr: 1,
+                  maxWidth: 380,
+                  '& .MuiChip-label': {
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  },
+                }}
+                title={APP_VERSION_LABEL}
+              />
+
               <Chip
                 size="small"
                 label={userNickname ? userNickname : (userRole === 'admin' ? 'Admin' : 'User')}
@@ -876,6 +896,27 @@ function MainApp() {
             horizontal: 'right',
           }}
         >
+          {/* Version (always visible in settings menu) */}
+          <MenuItem disabled>
+            <ListItemIcon>
+              <BuildIcon />
+            </ListItemIcon>
+            <ListItemText
+              primary={APP_VERSION_LABEL}
+              primaryTypographyProps={{
+                sx: {
+                  fontWeight: 900,
+                  maxWidth: 340,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                },
+                title: APP_VERSION_LABEL,
+              }}
+            />
+          </MenuItem>
+          <Divider />
+
           {/* MOBILE: allow switching tabs from the Settings dropdown as well */}
           {isMobile && (
             <>
@@ -1104,7 +1145,7 @@ function MainApp() {
             left: 10,
             right: 10,
             bottom: isMobile ? 74 : 10,
-            zIndex: (theme) => theme.zIndex.appBar,
+            zIndex: (theme) => theme.zIndex.appBar + 1,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
