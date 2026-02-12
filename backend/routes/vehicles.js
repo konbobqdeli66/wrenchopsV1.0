@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { checkPermission } = require('../middleware/permissions');
+const { ciIncludes } = require('../utils/ciText');
 
 const router = express.Router();
 
@@ -23,60 +24,60 @@ router.get('/', checkPermission('vehicles', 'read'), (req, res) => {
 
 // Search vehicles by various criteria
 router.get('/search', checkPermission('vehicles', 'read'), (req, res) => {
-  const { q, reg_number, vin, brand, model, vehicle_type, client_id } = req.query;
+  const q = String(req.query?.q ?? '');
+  const reg_number = String(req.query?.reg_number ?? '');
+  const vin = String(req.query?.vin ?? '');
+  const brand = String(req.query?.brand ?? '');
+  const model = String(req.query?.model ?? '');
+  const vehicle_type = String(req.query?.vehicle_type ?? '');
+  const client_id = req.query?.client_id;
 
-  let query = `
+  // NOTE: SQLite NOCASE/LOWER/UPPER are ASCII-only by default.
+  // To make searches ignore upper/lower for Cyrillic/Unicode, we filter in JS.
+  const baseQuery = `
     SELECT v.*, c.name as client_name
     FROM vehicles v
     JOIN clients c ON v.client_id = c.id
-    WHERE 1=1
+    ORDER BY v.brand, v.model
   `;
-  const params = [];
 
-  if (q) {
-    // Case-insensitive search (NOCASE)
-    query += ' AND (v.reg_number LIKE ? COLLATE NOCASE OR v.brand LIKE ? COLLATE NOCASE OR v.model LIKE ? COLLATE NOCASE OR c.name LIKE ? COLLATE NOCASE)';
-    const searchTerm = `%${q}%`;
-    params.push(searchTerm, searchTerm, searchTerm, searchTerm);
-  }
-
-  if (reg_number) {
-    query += ' AND v.reg_number LIKE ? COLLATE NOCASE';
-    params.push(`%${reg_number}%`);
-  }
-
-  if (vin) {
-    query += ' AND v.vin LIKE ? COLLATE NOCASE';
-    params.push(`%${vin}%`);
-  }
-
-  if (brand) {
-    query += ' AND v.brand LIKE ? COLLATE NOCASE';
-    params.push(`%${brand}%`);
-  }
-
-  if (model) {
-    query += ' AND v.model LIKE ? COLLATE NOCASE';
-    params.push(`%${model}%`);
-  }
-
-  if (vehicle_type) {
-    query += ' AND v.vehicle_type = ?';
-    params.push(vehicle_type);
-  }
-
-  if (client_id) {
-    query += ' AND v.client_id = ?';
-    params.push(client_id);
-  }
-
-  query += ' ORDER BY v.brand, v.model';
-
-  db.all(query, params, (err, rows) => {
+  db.all(baseQuery, [], (err, rows) => {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
-    res.json(rows);
+
+    const list = Array.isArray(rows) ? rows : [];
+    const clientIdNum = client_id === undefined ? null : Number(client_id);
+
+    const filtered = list.filter((v) => {
+      if (vehicle_type) {
+        const vt = String(v?.vehicle_type || '').trim().toLowerCase();
+        const want = String(vehicle_type || '').trim().toLowerCase();
+        if (vt !== want) return false;
+      }
+
+      if (clientIdNum !== null && Number.isFinite(clientIdNum)) {
+        if (Number(v?.client_id) !== clientIdNum) return false;
+      }
+
+      if (q.trim()) {
+        const ok =
+          ciIncludes(v?.reg_number, q) ||
+          ciIncludes(v?.brand, q) ||
+          ciIncludes(v?.model, q) ||
+          ciIncludes(v?.client_name, q);
+        if (!ok) return false;
+      }
+
+      if (reg_number.trim() && !ciIncludes(v?.reg_number, reg_number)) return false;
+      if (vin.trim() && !ciIncludes(v?.vin, vin)) return false;
+      if (brand.trim() && !ciIncludes(v?.brand, brand)) return false;
+      if (model.trim() && !ciIncludes(v?.model, model)) return false;
+
+      return true;
+    });
+
+    res.json(filtered);
   });
 });
 

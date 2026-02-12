@@ -51,6 +51,7 @@ import {
   getWorktimeSubcategoryKey,
 } from "../utils/worktimeClassification";
 import { filterCategoriesByGroupAccess } from "../utils/worktimeGroupAccess";
+import { ciIncludes, normCi } from "../utils/ciSearch";
 
 export default function Orders({ t, userPermissions, userRole }) {
   const [orders, setOrders] = useState([]);
@@ -194,7 +195,7 @@ export default function Orders({ t, userPermissions, userRole }) {
   }, [availableWorktimes, orderVehicleType, worktimeCategoryKey]);
 
   const filteredAvailableWorktimes = useMemo(() => {
-    const q = String(worktimeSearch || '').trim().toLowerCase();
+    const q = normCi(worktimeSearch).trim();
     const list = Array.isArray(availableWorktimes) ? availableWorktimes : [];
     return list
       .filter((w) => getWorktimeCategoryKey(w, orderVehicleType) === worktimeCategoryKey)
@@ -212,7 +213,7 @@ export default function Orders({ t, userPermissions, userRole }) {
       .filter((w) => {
         if (!q) return true;
         const catLabel = formatCategoryLabel(orderVehicleType, w.component_type);
-        return `${w.title} ${w.component_type} ${catLabel}`.toLowerCase().includes(q);
+        return ciIncludes(`${w.title} ${w.component_type} ${catLabel}`, q);
       });
   }, [availableWorktimes, orderVehicleType, worktimeCategoryKey, worktimeSubcategoryKey, worktimeSearch, selectionSubcategoriesWithLegacy.length, selectionCategoryHasSubcategories]);
 

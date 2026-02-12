@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { checkPermission } = require('../middleware/permissions');
+const { ciIncludes } = require('../utils/ciText');
 
 const XLSX = require('xlsx');
 const multer = require('multer');
@@ -226,19 +227,23 @@ router.get('/', checkPermission('clients', 'read'), (req, res) => {
 
 // Търсене на клиенти
 router.get('/search', checkPermission('clients', 'read'), (req, res) => {
-    const { q } = req.query;
-    db.all(
-        // Case-insensitive search (NOCASE)
-        'SELECT * FROM clients WHERE name LIKE ? COLLATE NOCASE OR phone LIKE ? COLLATE NOCASE',
-        [`%${q}%`, `%${q}%`],
-        (err, rows) => {
-            if (err) {
-                res.status(500).json({ error: err.message });
-                return;
-            }
-            res.json(rows);
+    const q = String(req.query?.q ?? '');
+    // Load candidate rows and apply Unicode case-insensitive filter in JS.
+    db.all('SELECT * FROM clients', [], (err, rows) => {
+        if (err) {
+            res.status(500).json({ error: err.message });
+            return;
         }
-    );
+
+        const list = Array.isArray(rows) ? rows : [];
+        const filtered = list.filter((c) => {
+            return (
+                ciIncludes(c?.name, q) ||
+                ciIncludes(c?.phone, q)
+            );
+        });
+        res.json(filtered);
+    });
 });
 
 // Неплатени фактури по клиент (групирано по client_name)

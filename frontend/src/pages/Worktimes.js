@@ -41,6 +41,7 @@ import {
   getWorktimeSubcategoryKey,
 } from "../utils/worktimeClassification";
 import { filterCategoriesByGroupAccess } from "../utils/worktimeGroupAccess";
+import { ciIncludes, normCi } from "../utils/ciSearch";
 
 export default function Worktimes({ t, userPermissions, userRole }) {
   const [worktimes, setWorktimes] = useState([]);
@@ -130,7 +131,7 @@ export default function Worktimes({ t, userPermissions, userRole }) {
     // Only show worktimes after the user reaches the final step.
     if (navStep !== 'worktimes') return [];
 
-    const q = String(search || '').trim().toLowerCase();
+    const q = normCi(search).trim();
     return (worktimes || [])
       .filter((w) => getWorktimeCategoryKey(w, vehicleTypeFilter) === activeCategoryKey)
       .filter((w) => {
@@ -148,7 +149,7 @@ export default function Worktimes({ t, userPermissions, userRole }) {
       })
       .filter((w) => {
         if (!q) return true;
-        return String(w?.title || '').toLowerCase().includes(q);
+        return ciIncludes(w?.title, q);
       });
   }, [worktimes, vehicleTypeFilter, activeCategoryKey, activeSubcategoryKey, search, subcategoriesWithLegacy.length, navStep, activeCategoryHasSubcategories]);
 

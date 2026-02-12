@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../db');
 const puppeteer = require('puppeteer');
 const { checkPermission } = require('../middleware/permissions');
+const { ciIncludes } = require('../utils/ciText');
 const {
     loadWorktimesGroupPermissionsMap,
     canAccessWorktimesGroup,
@@ -198,7 +199,10 @@ router.delete('/:id/documents', checkPermission('invoices', 'delete'), (req, res
 
 // Търсене на поръчки по рег. номер или име на клиент
 router.get('/search', checkPermission('orders', 'read'), (req, res) => {
-    const { q } = req.query;
+    const q = String(req.query?.q ?? '');
+
+    // NOTE: SQLite NOCASE/LOWER/UPPER are ASCII-only by default.
+    // To make searches ignore upper/lower for Cyrillic/Unicode, we filter in JS.
     db.all(
         `
           SELECT
@@ -208,17 +212,21 @@ router.get('/search', checkPermission('orders', 'read'), (req, res) => {
           LEFT JOIN order_worktimes ow ON ow.order_id = o.id
           LEFT JOIN worktimes w ON w.id = ow.worktime_id
           WHERE o.status = 'active'
-            AND (o.reg_number LIKE ? COLLATE NOCASE OR o.client_name LIKE ? COLLATE NOCASE)
           GROUP BY o.id
           ORDER BY o.created_at DESC
         `,
-        [`%${q}%`, `%${q}%`],
+        [],
         (err, rows) => {
             if (err) {
                 res.status(500).json({ error: err.message });
                 return;
             }
-            res.json(rows);
+
+            const list = Array.isArray(rows) ? rows : [];
+            const filtered = list.filter((o) => {
+                return ciIncludes(o?.reg_number, q) || ciIncludes(o?.client_name, q);
+            });
+            res.json(filtered);
         }
     );
 });

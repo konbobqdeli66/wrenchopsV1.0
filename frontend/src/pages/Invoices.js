@@ -50,6 +50,7 @@ import {
   getCategoriesForVehicleType,
   getWorktimeCategoryKey,
 } from '../utils/worktimeClassification';
+import { ciIncludes, normCi } from '../utils/ciSearch';
 
 export default function Invoices({ canDeleteInvoices = false }) {
   const fullScreenDialog = useMediaQuery('(max-width:600px)');
@@ -459,7 +460,7 @@ export default function Invoices({ canDeleteInvoices = false }) {
   }, [baseOrders, invoicedDocsByOrderId]);
 
   const filteredOrders = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = normCi(search).trim();
     const monthFiltered =
       monthKey === 'all'
         ? baseOrders
@@ -473,7 +474,7 @@ export default function Invoices({ canDeleteInvoices = false }) {
     const searched = !q
       ? monthFiltered
       : monthFiltered.filter((o) =>
-          `${o.reg_number} ${o.client_name} ${o.complaint}`.toLowerCase().includes(q)
+          ciIncludes(`${o.reg_number} ${o.client_name} ${o.complaint}`, q)
         );
 
     const getTs = (o) => {
@@ -2585,10 +2586,10 @@ export default function Invoices({ canDeleteInvoices = false }) {
             {availableWorktimes
               .filter((w) => {
                 if (getWorktimeCategoryKey(w, categoryVehicleType) !== worktimeCategoryKey) return false;
-                const q = worktimeSearch.trim().toLowerCase();
+                const q = normCi(worktimeSearch).trim();
                 if (!q) return true;
                 const catLabel = formatCategoryLabel(categoryVehicleType, w.component_type);
-                return `${w.title} ${w.component_type} ${catLabel}`.toLowerCase().includes(q);
+                return ciIncludes(`${w.title} ${w.component_type} ${catLabel}`, q);
               })
               .map((w, idx, arr) => (
                 <div key={w.id}>
