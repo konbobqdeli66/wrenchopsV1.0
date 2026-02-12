@@ -929,8 +929,7 @@ export default function Invoices({ canDeleteInvoices = false }) {
     const protocolTotalHours = totalHours + freeOpsHoursEqTotal;
 
     // IMPORTANT: "Свободни Операции" are treated as LABOR (converted to equivalent hours).
-    // We still keep `freeOpsNet` as the source-of-truth input for the equivalent hours, but the invoice/protocol
-    // totals are presented as labor only.
+    // Totals are presented as labor only.
     const laborTaxBase = protocolTotalHours * effectiveHourlyRate;
     const taxBase = laborTaxBase;
     const vatAmount = taxBase * (vatRate / 100);
@@ -2198,11 +2197,7 @@ export default function Invoices({ canDeleteInvoices = false }) {
               <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
                 Цена на час: <strong>{effectiveHourlyRatePreview.toFixed(2)} лв/ч</strong>
               </Typography>
-              {freeOpsNetPreview > 0 ? (
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                  Свободни операции (без ДДС): <strong>{freeOpsNetPreview.toFixed(2)} лв</strong>
-                </Typography>
-              ) : null}
+               {/* Free ops are treated as labor; avoid showing a separate line here to match document summaries. */}
               <Typography variant="body2" color="text.secondary">
                 ДДС: <strong>{Number(company.vat_rate) || 20}%</strong>
               </Typography>
