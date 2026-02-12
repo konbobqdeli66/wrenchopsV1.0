@@ -573,6 +573,14 @@ db.run("ALTER TABLE worktimes ADD COLUMN vehicle_type TEXT DEFAULT 'truck'", (er
   }
 });
 
+// --- Order worktimes: manual unit prices (for free operations invoicing) ---
+db.run('ALTER TABLE order_worktimes ADD COLUMN unit_price_bgn REAL', (err) => {
+  const msg = String(err?.message || '').toLowerCase();
+  if (err && !msg.includes('duplicate column') && !msg.includes('no such table')) {
+    console.warn('Could not add order_worktimes.unit_price_bgn column:', err.message);
+  }
+});
+
 // Backfill vehicle_type for existing rows (keep safe default 'truck')
 db.run("UPDATE worktimes SET vehicle_type = COALESCE(vehicle_type, 'truck')", (err) => {
   const msg = String(err?.message || '').toLowerCase();

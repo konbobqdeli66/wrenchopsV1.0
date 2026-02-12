@@ -134,6 +134,8 @@ export default function Invoices({ canDeleteInvoices = false }) {
   const [worktimeDetailsOpen, setWorktimeDetailsOpen] = useState(false);
   const [selectedOrderWorktime, setSelectedOrderWorktime] = useState(null);
   const [quantityDraft, setQuantityDraft] = useState(1);
+  const [priceDraft, setPriceDraft] = useState(0);
+  const [savingPrice, setSavingPrice] = useState(false);
 
   const [notesDialogOpen, setNotesDialogOpen] = useState(false);
   const [notesDraft, setNotesDraft] = useState('');
@@ -311,8 +313,25 @@ export default function Invoices({ canDeleteInvoices = false }) {
 
   async function loadAvailableWorktimes() {
     try {
-      const res = await axios.get(`${getApiBaseUrl()}/worktimes`);
-      setAvailableWorktimes(res.data);
+      // Load standard worktimes (permission-gated) + free operations (available for ALL authenticated users).
+      const vt = categoryVehicleType || 'truck';
+
+      const stdPromise = axios.get(`${getApiBaseUrl()}/worktimes?vehicle_type=${encodeURIComponent(vt)}`);
+      const freePromise = axios.get(`${getApiBaseUrl()}/worktimes/free_ops?vehicle_type=${encodeURIComponent(vt)}`);
+
+      const [stdRes, freeRes] = await Promise.allSettled([stdPromise, freePromise]);
+
+      const std = stdRes.status === 'fulfilled' ? (Array.isArray(stdRes.value.data) ? stdRes.value.data : []) : [];
+      const free = freeRes.status === 'fulfilled' ? (Array.isArray(freeRes.value.data) ? freeRes.value.data : []) : [];
+
+      // Merge, de-duplicate by id (free ops are stored in the same table).
+      const byId = new Map();
+      [...std, ...free].forEach((w) => {
+        if (!w?.id) return;
+        byId.set(w.id, w);
+      });
+
+      setAvailableWorktimes(Array.from(byId.values()));
     } catch {
       setAvailableWorktimes([]);
     }
@@ -598,9 +617,7 @@ export default function Invoices({ canDeleteInvoices = false }) {
 
   const openAddWorktimeDialog = async () => {
     setAddWorktimeDialogOpen(true);
-    if (availableWorktimes.length === 0) {
-      await loadAvailableWorktimes();
-    }
+    await loadAvailableWorktimes();
   };
 
   const addWorktimeToOrder = async (worktime) => {
@@ -652,6 +669,7 @@ export default function Invoices({ canDeleteInvoices = false }) {
   const openWorktimeDetails = (ow) => {
     setSelectedOrderWorktime(ow);
     setQuantityDraft(ow?.quantity || 1);
+    setPriceDraft(Number(ow?.unit_price_bgn) || 0);
     setWorktimeDetailsOpen(true);
   };
 
@@ -823,6 +841,24 @@ export default function Invoices({ canDeleteInvoices = false }) {
 
   const isSelectedOrderAlreadyInvoiced = Boolean(invoicedDocForSelectedOrder);
 
+  const missingFreeOps = useMemo(() => {
+    const rows = Array.isArray(orderWorktimes) ? orderWorktimes : [];
+    return rows.filter((ow) => {
+      const isFree = String(ow?.component_type || '').trim() === 'free_ops';
+      if (!isFree) return false;
+      const qty = Number(ow?.quantity) || 0;
+      const price = Number(ow?.unit_price_bgn);
+      return qty > 0 && (!Number.isFinite(price) || price <= 0);
+    });
+  }, [orderWorktimes]);
+
+  const freeOpsNetPreview = useMemo(() => {
+    const rows = Array.isArray(orderWorktimes) ? orderWorktimes : [];
+    return rows
+      .filter((ow) => String(ow?.component_type || '').trim() === 'free_ops')
+      .reduce((sum, ow) => sum + (Number(ow?.unit_price_bgn) || 0) * (Number(ow?.quantity) || 0), 0);
+  }, [orderWorktimes]);
+
   const appliedMultiplierPreview = useMemo(() => {
     // If already invoiced, keep the stored multipliers (don’t allow changing pricing on an existing invoice).
     if (invoicedDocForSelectedOrder) {
@@ -860,8 +896,19 @@ export default function Invoices({ canDeleteInvoices = false }) {
 
   const openInvoicePrint = (docNumbers) => {
     if (!selectedOrder) return;
-    const totalHours = orderWorktimes.reduce(
+    const laborWorktimes = (orderWorktimes || []).filter(
+      (ow) => String(ow?.component_type || '').trim() !== 'free_ops'
+    );
+    const freeOpsWorktimes = (orderWorktimes || []).filter(
+      (ow) => String(ow?.component_type || '').trim() === 'free_ops'
+    );
+
+    const totalHours = laborWorktimes.reduce(
       (sum, ow) => sum + (Number(ow.hours) || 0) * (Number(ow.quantity) || 0),
+      0
+    );
+    const freeOpsNet = freeOpsWorktimes.reduce(
+      (sum, ow) => sum + (Number(ow.unit_price_bgn) || 0) * (Number(ow.quantity) || 0),
       0
     );
     const hourlyRate = Number(company.hourly_rate) || 100;
@@ -875,7 +922,8 @@ export default function Invoices({ canDeleteInvoices = false }) {
     // Apply multipliers directly to the hourly rate, but do NOT mention them anywhere in the documents.
     const effectiveHourlyRate = hourlyRate * multiplier;
 
-    const taxBase = totalHours * effectiveHourlyRate;
+    const laborTaxBase = totalHours * effectiveHourlyRate;
+    const taxBase = laborTaxBase + freeOpsNet;
     const vatAmount = taxBase * (vatRate / 100);
     const totalAmount = taxBase + vatAmount;
 
@@ -903,14 +951,15 @@ export default function Invoices({ canDeleteInvoices = false }) {
         const qty = Number(ow.quantity) || 0;
         const total = hours * qty;
         const notes = ow.notes ? escapeHtml(ow.notes) : '';
+        const isFreeOps = String(ow?.component_type || '').trim() === 'free_ops';
         return `
           <tr>
             <td style="text-align:center">${idx + 1}</td>
             <td>${escapeHtml(ow.worktime_title)}</td>
             <td class="notes">${notes}</td>
-            <td style="text-align:right">${hours.toFixed(2).replace(/\.00$/, '')}</td>
+            <td style="text-align:right">${isFreeOps ? '—' : hours.toFixed(2).replace(/\.00$/, '')}</td>
             <td style="text-align:right">${qty}</td>
-            <td style="text-align:right">${total.toFixed(2).replace(/\.00$/, '')}</td>
+            <td style="text-align:right">${isFreeOps ? '—' : total.toFixed(2).replace(/\.00$/, '')}</td>
           </tr>
         `;
       });
@@ -921,18 +970,43 @@ export default function Invoices({ canDeleteInvoices = false }) {
 
     const serviceDescription = `Ремонт на ${assetLabel} с регистрационен номер ${selectedOrder.reg_number} съгласно работна карта: ${protocolNo}`;
 
-    // Invoice shows a single summarized row (totals are calculated from the worktimes above).
-    const invoiceRowsHtml = `
+    // Invoice rows:
+    // 1) Labor row (hours-based)
+    // 2) Each "Свободни Операции" row (manual unit price)
+    const laborRowHtml = `
       <tr>
         <td style="text-align:center">1</td>
         <td>${escapeHtml(serviceDescription)}</td>
         <td>${escapeHtml(selectedOrder.reg_number || '')}</td>
         <td style="text-align:right">1</td>
-        <td style="text-align:right">${taxBase.toFixed(2)}</td>
+        <td style="text-align:right">${laborTaxBase.toFixed(2)}</td>
         <td style="text-align:right">${vatRate.toFixed(2)}%</td>
-        <td style="text-align:right">${taxBase.toFixed(2)}</td>
+        <td style="text-align:right">${laborTaxBase.toFixed(2)}</td>
       </tr>
     `;
+
+    const freeOpsRowsHtml = freeOpsWorktimes
+      .filter((ow) => (Number(ow.quantity) || 0) > 0)
+      .map((ow, i) => {
+        const idx = i + 2;
+        const qty = Number(ow.quantity) || 0;
+        const unit = Number(ow.unit_price_bgn) || 0;
+        const lineNet = unit * qty;
+        return `
+          <tr>
+            <td style="text-align:center">${idx}</td>
+            <td>${escapeHtml(`Свободни Операции: ${ow.worktime_title}`)}</td>
+            <td>${escapeHtml(selectedOrder.reg_number || '')}</td>
+            <td style="text-align:right">${qty}</td>
+            <td style="text-align:right">${unit.toFixed(2)}</td>
+            <td style="text-align:right">${vatRate.toFixed(2)}%</td>
+            <td style="text-align:right">${lineNet.toFixed(2)}</td>
+          </tr>
+        `;
+      })
+      .join('');
+
+    const invoiceRowsHtml = `${laborRowHtml}${freeOpsRowsHtml}`;
 
     // Print 2 copies of each document with a faint watermark.
     const WATERMARK_ORIGINAL = 'ОРИГИНАЛ';
@@ -1027,11 +1101,12 @@ export default function Invoices({ canDeleteInvoices = false }) {
             <div style="flex:1;" class="summary">
               <div class="line"><span><strong>Общо часове:</strong></span><span><strong>${totalHours.toFixed(2).replace(/\.00$/, '')} ч.</strong></span></div>
               <div class="line"><span><strong>Цена на час:</strong></span><span><strong>${fmtBgnEur(effectiveHourlyRate)}</strong></span></div>
-              <div class="line"><span><strong>Общо без ДДС:</strong></span><span><strong>${fmtBgnEur(taxBase)}</strong></span></div>
-              <div class="line"><span><strong>ДДС:</strong></span><span><strong>${fmtBgnEur(vatAmount)}</strong></span></div>
-              <div class="line"><span><strong>За плащане:</strong></span><span><strong>${fmtBgnEur(totalAmount)}</strong></span></div>
-            </div>
-          </div>
+               <div class="line"><span><strong>Свободни операции (без ДДС):</strong></span><span><strong>${fmtBgnEur(freeOpsNet)}</strong></span></div>
+               <div class="line"><span><strong>Общо без ДДС:</strong></span><span><strong>${fmtBgnEur(taxBase)}</strong></span></div>
+               <div class="line"><span><strong>ДДС:</strong></span><span><strong>${fmtBgnEur(vatAmount)}</strong></span></div>
+               <div class="line"><span><strong>За плащане:</strong></span><span><strong>${fmtBgnEur(totalAmount)}</strong></span></div>
+             </div>
+           </div>
 
           <div style="display:flex; justify-content: flex-end; margin-top: 10mm;">
             <div style="min-width: 80mm; text-align: left;">
@@ -1359,6 +1434,34 @@ export default function Invoices({ canDeleteInvoices = false }) {
     } finally {
       setSavingNotes(false);
       setNotesDialogOpen(false);
+    }
+  };
+
+  // --- Free operations pricing helpers (manual unit price) ---
+  const saveFreeOpsPrice = async () => {
+    if (!selectedOrder || !selectedOrderWorktime) return;
+    const isFreeOps = String(selectedOrderWorktime?.component_type || '').trim() === 'free_ops';
+    if (!isFreeOps) return;
+
+    const parsed = Number(String(priceDraft ?? '').replace(',', '.'));
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      alert('Моля въведете валидна цена (> 0 лв) за „Свободни Операции“.');
+      return;
+    }
+
+    try {
+      setSavingPrice(true);
+      const res = await axios.put(
+        `${getApiBaseUrl()}/orders/${selectedOrder.id}/worktimes/${selectedOrderWorktime.id}`,
+        { unit_price_bgn: parsed }
+      );
+      const updated = res?.data;
+      setSelectedOrderWorktime(updated);
+      setOrderWorktimes((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Грешка при запис на цена.');
+    } finally {
+      setSavingPrice(false);
     }
   };
 
@@ -1909,6 +2012,8 @@ export default function Invoices({ canDeleteInvoices = false }) {
 
                 <List dense sx={{ p: 0 }}>
                   {orderWorktimes.map((ow, idx) => {
+                    const isFreeOps = String(ow?.component_type || '').trim() === 'free_ops';
+                    const unitPrice = Number(ow?.unit_price_bgn) || 0;
                     const total = (ow.hours || 0) * (ow.quantity || 0);
                     return (
                       <div key={ow.id}>
@@ -1944,8 +2049,21 @@ export default function Invoices({ canDeleteInvoices = false }) {
                                     size="small"
                                     variant="outlined"
                                   />
-                                  <Chip label={`${ow.hours}ч`} size="small" variant="outlined" />
+                                  {isFreeOps ? (
+                                    <Chip label="Без нормовреме" size="small" variant="outlined" />
+                                  ) : (
+                                    <Chip label={`${ow.hours}ч`} size="small" variant="outlined" />
+                                  )}
                                   <Chip label={`x${ow.quantity}`} size="small" variant="outlined" />
+                                  {isFreeOps ? (
+                                    <Chip
+                                      label={unitPrice > 0 ? `Цена: ${unitPrice.toFixed(2)} лв` : 'Липсва цена'}
+                                      size="small"
+                                      color={unitPrice > 0 ? 'success' : 'error'}
+                                      variant={unitPrice > 0 ? 'outlined' : 'filled'}
+                                      sx={{ fontWeight: 900 }}
+                                    />
+                                  ) : null}
                                 {ow.notes ? (
                                   <StickyNote2Icon
                                     titleAccess="Има бележка"
@@ -2087,9 +2205,50 @@ export default function Invoices({ canDeleteInvoices = false }) {
               <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
                 Цена на час: <strong>{effectiveHourlyRatePreview.toFixed(2)} лв/ч</strong>
               </Typography>
+              {freeOpsNetPreview > 0 ? (
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                  Свободни операции (без ДДС): <strong>{freeOpsNetPreview.toFixed(2)} лв</strong>
+                </Typography>
+              ) : null}
               <Typography variant="body2" color="text.secondary">
                 ДДС: <strong>{Number(company.vat_rate) || 20}%</strong>
               </Typography>
+
+              {missingFreeOps.length ? (
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    mt: 1.25,
+                    p: 1.25,
+                    borderRadius: 2,
+                    borderColor: 'error.main',
+                    bgcolor: (theme) => theme.palette.error.main + '08',
+                  }}
+                >
+                  <Typography sx={{ fontWeight: 900, color: 'error.main' }}>
+                    Липсва цена за „Свободни Операции“
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+                    Фактуриране няма да е възможно докато не се въведе цена за тези позиции:
+                  </Typography>
+                  <Box component="ul" sx={{ m: 0, pl: 2.25, mt: 0.75 }}>
+                    {missingFreeOps.slice(0, 6).map((x) => (
+                      <li key={x.id}>
+                        <Typography variant="body2" sx={{ fontWeight: 800 }}>
+                          {x.worktime_title}
+                        </Typography>
+                      </li>
+                    ))}
+                    {missingFreeOps.length > 6 ? (
+                      <li>
+                        <Typography variant="body2" color="text.secondary">
+                          + още {missingFreeOps.length - 6}
+                        </Typography>
+                      </li>
+                    ) : null}
+                  </Box>
+                </Paper>
+              ) : null}
 
               <Box sx={{ mt: 1.5 }}>
                 <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 0.5 }}>
@@ -2182,8 +2341,8 @@ export default function Invoices({ canDeleteInvoices = false }) {
                 setTimeout(() => {
                   void sendInvoiceEmailForDoc(doc);
                 }, 0);
-              } catch {
-                alert('Грешка при генериране на номера за протокол/фактура');
+              } catch (e) {
+                alert(e?.response?.data?.error || 'Грешка при генериране на номера за протокол/фактура');
               } finally {
                 setReservingDocs(false);
               }
@@ -2191,7 +2350,8 @@ export default function Invoices({ canDeleteInvoices = false }) {
             disabled={
               reservingDocs ||
               (!selectedVehicleType && !vehicleTypeOverride) ||
-              (sendInvoiceByEmail && !String(invoiceEmailInputRef.current || invoiceEmailTo || '').trim())
+              (sendInvoiceByEmail && !String(invoiceEmailInputRef.current || invoiceEmailTo || '').trim()) ||
+              missingFreeOps.length > 0
             }
           >
             {reservingDocs ? 'Генериране...' : 'Потвърди'}
@@ -2222,7 +2382,11 @@ export default function Invoices({ canDeleteInvoices = false }) {
                   label={`Категория: ${formatCategoryLabel(categoryVehicleType, selectedOrderWorktime.component_type)}`}
                   size="small"
                 />
-                <Chip label={`Време: ${selectedOrderWorktime.hours}ч`} size="small" />
+                {String(selectedOrderWorktime?.component_type || '').trim() === 'free_ops' ? (
+                  <Chip label="Без нормовреме" size="small" />
+                ) : (
+                  <Chip label={`Време: ${selectedOrderWorktime.hours}ч`} size="small" />
+                )}
                 <Chip label={`Количество: x${selectedOrderWorktime.quantity}`} size="small" />
                 <Chip
                   label={`Общо: ${(selectedOrderWorktime.hours * selectedOrderWorktime.quantity).toFixed(2).replace(/\.00$/, '')}ч`}
@@ -2230,7 +2394,51 @@ export default function Invoices({ canDeleteInvoices = false }) {
                   color="primary"
                   sx={{ fontWeight: 800 }}
                 />
+                {String(selectedOrderWorktime?.component_type || '').trim() === 'free_ops' ? (
+                  <Chip
+                    label={(Number(selectedOrderWorktime?.unit_price_bgn) || 0) > 0
+                      ? `Цена: ${(Number(selectedOrderWorktime?.unit_price_bgn) || 0).toFixed(2)} лв`
+                      : 'Липсва цена'}
+                    size="small"
+                    color={(Number(selectedOrderWorktime?.unit_price_bgn) || 0) > 0 ? 'success' : 'error'}
+                    variant={(Number(selectedOrderWorktime?.unit_price_bgn) || 0) > 0 ? 'outlined' : 'filled'}
+                    sx={{ fontWeight: 900 }}
+                  />
+                ) : null}
               </Box>
+
+              {String(selectedOrderWorktime?.component_type || '').trim() === 'free_ops' ? (
+                <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 900, mb: 0.75 }}>
+                    Цена за фактуриране (ед. цена)
+                  </Typography>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                    <TextField
+                      label="Ед. цена (лв) *"
+                      type="number"
+                      size="small"
+                      value={priceDraft}
+                      onChange={(e) => setPriceDraft(e.target.value)}
+                      inputProps={{ min: 0, step: '0.01' }}
+                      sx={{ width: { xs: '100%', sm: 220 } }}
+                      helperText='Задължително поле за „Свободни Операции“. Фактуриране няма да е възможно без цена.'
+                      disabled={isSelectedOrderAlreadyInvoiced || savingPrice}
+                    />
+                    <Button
+                      variant="contained"
+                      onClick={saveFreeOpsPrice}
+                      disabled={isSelectedOrderAlreadyInvoiced || savingPrice}
+                    >
+                      {savingPrice ? 'Запис...' : 'Запази цена'}
+                    </Button>
+                  </Stack>
+                  {isSelectedOrderAlreadyInvoiced ? (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
+                      Поръчката вече е фактурирана – цената не може да се променя.
+                    </Typography>
+                  ) : null}
+                </Paper>
+              ) : null}
 
               <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
                 <TextField
@@ -2401,7 +2609,11 @@ export default function Invoices({ canDeleteInvoices = false }) {
                       primary={w.title}
                       secondary={`Категория: ${formatCategoryLabel(categoryVehicleType, w.component_type)}`}
                     />
-                    <Chip label={`${w.hours}ч`} size="small" variant="outlined" />
+                    {String(w?.component_type || '').trim() === 'free_ops' ? (
+                      <Chip label="Без нормовреме" size="small" variant="outlined" />
+                    ) : (
+                      <Chip label={`${w.hours}ч`} size="small" variant="outlined" />
+                    )}
                   </ListItem>
                   {idx < arr.length - 1 && <Divider sx={{ my: 0.25 }} />}
                 </div>

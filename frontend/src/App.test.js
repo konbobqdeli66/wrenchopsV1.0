@@ -1,8 +1,10 @@
+// NOTE:
+// The default CRA template test expected a "learn react" link.
+// This app renders a login screen by default, so we assert that instead.
 import { render, screen } from '@testing-library/react';
 import App from './App';
 
-test('renders learn react link', () => {
+test('renders login screen', () => {
   render(<App />);
-  const linkElement = screen.getByText(/learn react/i);
-  expect(linkElement).toBeInTheDocument();
+  expect(screen.getByText(/Вход в системата/i)).toBeInTheDocument();
 });

@@ -115,6 +115,8 @@ CREATE TABLE IF NOT EXISTS order_worktimes (
     order_id INTEGER NOT NULL,
     worktime_id INTEGER NOT NULL,
     quantity INTEGER DEFAULT 1,
+    -- Manual unit price in BGN (used for "free_ops" worktimes; required at invoicing)
+    unit_price_bgn REAL,
     notes TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (order_id) REFERENCES orders (id) ON DELETE CASCADE,

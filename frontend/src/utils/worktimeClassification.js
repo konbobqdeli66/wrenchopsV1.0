@@ -15,6 +15,8 @@ export const TRUCK_CATEGORIES = [
   { key: 'suspension', no: 7, label: 'Окачване' },
   { key: 'cabin', no: 8, label: 'Кабина' },
   { key: 'attachments', no: 9, label: 'Прикачни елементи' },
+  // Free operations (manual price at invoicing; no standard hours)
+  { key: 'free_ops', no: 10, label: 'Свободни Операции' },
 ];
 
 // Truck subcategories (as in the provided classification screenshots).
@@ -119,6 +121,8 @@ export const TRAILER_CATEGORIES = [
   { key: 'axles_brakes', no: 3, label: 'Оси/Спирачки' },
   { key: 'pneumatic', no: 4, label: 'Пневматична система' },
   { key: 'body', no: 5, label: 'Каросерия' },
+  // Free operations (manual price at invoicing; no standard hours)
+  { key: 'free_ops', no: 6, label: 'Свободни Операции' },
 ];
 
 export const getCategoriesForVehicleType = (vehicleType) =>

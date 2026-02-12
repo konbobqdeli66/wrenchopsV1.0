@@ -61,11 +61,19 @@ export default function Worktimes({ t }) {
     subcomponent_type: "",
   });
 
+  const isFreeOpsCategoryKey = (key) => String(key || '').trim() === 'free_ops';
+
   const categories = getCategoriesForVehicleType(vehicleTypeFilter);
   const subcategories = useMemo(
     () => getSubcategoriesForCategoryKey(vehicleTypeFilter, activeCategoryKey),
     [vehicleTypeFilter, activeCategoryKey]
   );
+
+  const activeCategoryHasSubcategories = useMemo(() => {
+    if (vehicleTypeFilter === 'trailer') return false;
+    const list = getSubcategoriesForCategoryKey(vehicleTypeFilter, activeCategoryKey);
+    return Array.isArray(list) && list.length > 0;
+  }, [vehicleTypeFilter, activeCategoryKey]);
 
   const hasLegacyWorktimesInActiveCategory = useMemo(() => {
     if (vehicleTypeFilter === 'trailer') return false;
@@ -78,13 +86,14 @@ export default function Worktimes({ t }) {
 
   const subcategoriesWithLegacy = useMemo(() => {
     if (vehicleTypeFilter === 'trailer') return [];
+    if (!activeCategoryHasSubcategories) return [];
     const base = Array.isArray(subcategories) ? subcategories : [];
     if (!hasLegacyWorktimesInActiveCategory) return base;
     return [
       ...base,
       { key: '__legacy__', no: '—', label: 'Неразпределени (стар тип)' },
     ];
-  }, [vehicleTypeFilter, subcategories, hasLegacyWorktimesInActiveCategory]);
+  }, [vehicleTypeFilter, subcategories, hasLegacyWorktimesInActiveCategory, activeCategoryHasSubcategories]);
 
   const countByCategoryKey = useMemo(() => {
     const map = {};
@@ -118,6 +127,7 @@ export default function Worktimes({ t }) {
       .filter((w) => {
         // Subcategory applies only to trucks.
         if (vehicleTypeFilter === 'trailer') return true;
+        if (!activeCategoryHasSubcategories) return true;
         if (!subcategoriesWithLegacy.length) return true;
 
         // Enforce the hierarchy: Category -> Subcategory -> Worktime.
@@ -131,14 +141,20 @@ export default function Worktimes({ t }) {
         if (!q) return true;
         return String(w?.title || '').toLowerCase().includes(q);
       });
-  }, [worktimes, vehicleTypeFilter, activeCategoryKey, activeSubcategoryKey, search, subcategoriesWithLegacy.length, navStep]);
+  }, [worktimes, vehicleTypeFilter, activeCategoryKey, activeSubcategoryKey, search, subcategoriesWithLegacy.length, navStep, activeCategoryHasSubcategories]);
 
   const loadWorktimes = useCallback(async () => {
-    const res = await axios.get(
-      `${getApiBaseUrl()}/worktimes?vehicle_type=${encodeURIComponent(vehicleTypeFilter)}`
-    );
+    const isFreeOps = isFreeOpsCategoryKey(activeCategoryKey);
+
+    // NOTE: Free operations are editable by all authenticated users.
+    // We load them from a dedicated endpoint without the worktimes module permission gate.
+    const url = isFreeOps
+      ? `${getApiBaseUrl()}/worktimes/free_ops?vehicle_type=${encodeURIComponent(vehicleTypeFilter)}`
+      : `${getApiBaseUrl()}/worktimes?vehicle_type=${encodeURIComponent(vehicleTypeFilter)}`;
+
+    const res = await axios.get(url);
     setWorktimes(res.data);
-  }, [vehicleTypeFilter]);
+  }, [vehicleTypeFilter, activeCategoryKey]);
 
   useEffect(() => {
     loadWorktimes();
@@ -154,6 +170,16 @@ export default function Worktimes({ t }) {
   }, [vehicleTypeFilter]);
 
   useEffect(() => {
+    // If the active category has no subcategories, ensure we never land in the subcategory step.
+    if (vehicleTypeFilter === 'trailer') return;
+    if (navStep !== 'subcategory') return;
+    if (!activeCategoryHasSubcategories) {
+      setActiveSubcategoryKey('');
+      setNavStep('worktimes');
+    }
+  }, [vehicleTypeFilter, navStep, activeCategoryHasSubcategories]);
+
+  useEffect(() => {
     // Keep a valid subcategory key when on trucks.
     if (vehicleTypeFilter === 'trailer') return;
 
@@ -167,17 +193,26 @@ export default function Worktimes({ t }) {
   }, [vehicleTypeFilter, activeCategoryKey, activeSubcategoryKey]);
 
   async function createWorktime() {
-    const componentTypeForSave =
-      form.vehicle_type === 'truck'
-        ? (String(form.subcomponent_type || '').trim() || form.component_type)
-        : form.component_type;
+    const isFreeOps = isFreeOpsCategoryKey(form.component_type);
 
-    await axios.post(`${getApiBaseUrl()}/worktimes`, {
-      title: form.title,
-      hours: form.hours,
-      component_type: componentTypeForSave,
-      vehicle_type: form.vehicle_type,
-    });
+    if (isFreeOps) {
+      await axios.post(`${getApiBaseUrl()}/worktimes/free_ops`, {
+        title: form.title,
+        vehicle_type: form.vehicle_type,
+      });
+    } else {
+      const componentTypeForSave =
+        form.vehicle_type === 'truck'
+          ? (String(form.subcomponent_type || '').trim() || form.component_type)
+          : form.component_type;
+
+      await axios.post(`${getApiBaseUrl()}/worktimes`, {
+        title: form.title,
+        hours: form.hours,
+        component_type: componentTypeForSave,
+        vehicle_type: form.vehicle_type,
+      });
+    }
     // Reset but keep selected vehicle type and default category/subcategory.
     const vt = form.vehicle_type;
     const firstCatKey = getCategoriesForVehicleType(vt)[0]?.key || 'regular';
@@ -194,7 +229,12 @@ export default function Worktimes({ t }) {
   }
 
   async function deleteWorktime(id) {
-    await axios.delete(`${getApiBaseUrl()}/worktimes/${id}`);
+    const isFreeOps = isFreeOpsCategoryKey(activeCategoryKey);
+    const url = isFreeOps
+      ? `${getApiBaseUrl()}/worktimes/free_ops/${id}`
+      : `${getApiBaseUrl()}/worktimes/${id}`;
+
+    await axios.delete(url);
     loadWorktimes();
   }
 
@@ -276,7 +316,7 @@ export default function Worktimes({ t }) {
                   </Grid>
 
                   {/* Truck subcategory (submenu) */}
-                  {form.vehicle_type === 'truck' ? (
+                  {form.vehicle_type === 'truck' && !isFreeOpsCategoryKey(form.component_type) ? (
                     <Grid item xs={12}>
                       <FormControl fullWidth variant="outlined">
                         <InputLabel>Подменю</InputLabel>
@@ -313,6 +353,12 @@ export default function Worktimes({ t }) {
                       type="number"
                       step="0.1"
                       inputProps={{ min: 0 }}
+                      disabled={isFreeOpsCategoryKey(form.component_type)}
+                      helperText={
+                        isFreeOpsCategoryKey(form.component_type)
+                          ? 'За „Свободни Операции“ нормовреме не се изисква (цената се задава при фактуриране).'
+                          : ''
+                      }
                     />
                   </Grid>
                   <Grid item xs={12}>
@@ -385,7 +431,7 @@ export default function Worktimes({ t }) {
               </Grid>
 
               {/* Truck subcategory (submenu) */}
-              {form.vehicle_type === 'truck' ? (
+              {form.vehicle_type === 'truck' && !isFreeOpsCategoryKey(form.component_type) ? (
                 <Grid item xs={12}>
                   <FormControl fullWidth variant="outlined">
                     <InputLabel>Подменю</InputLabel>
@@ -412,18 +458,24 @@ export default function Worktimes({ t }) {
                   variant="outlined"
                 />
               </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label={t('worktimeHoursLabel')}
-                  value={form.hours}
-                  onChange={(e) => setForm({ ...form, hours: e.target.value })}
-                  variant="outlined"
-                  type="number"
-                 step="0.1"
-                 inputProps={{ min: 0 }}
-               />
-             </Grid>
+               <Grid item xs={12}>
+                 <TextField
+                   fullWidth
+                   label={t('worktimeHoursLabel')}
+                   value={form.hours}
+                   onChange={(e) => setForm({ ...form, hours: e.target.value })}
+                   variant="outlined"
+                   type="number"
+                  step="0.1"
+                  inputProps={{ min: 0 }}
+                  disabled={isFreeOpsCategoryKey(form.component_type)}
+                  helperText={
+                    isFreeOpsCategoryKey(form.component_type)
+                      ? 'За „Свободни Операции“ нормовреме не се изисква (цената се задава при фактуриране).'
+                      : ''
+                  }
+                />
+              </Grid>
                <Grid item xs={12}>
                  <Button
                    fullWidth
@@ -536,7 +588,15 @@ export default function Worktimes({ t }) {
                                 setNavStep('worktimes');
                                 return;
                               }
-                              const firstSub = getSubcategoriesForCategoryKey(vehicleTypeFilter, cat.key)[0]?.key || '';
+
+                              const list = getSubcategoriesForCategoryKey(vehicleTypeFilter, cat.key);
+                              const firstSub = list[0]?.key || '';
+                              if (!list.length) {
+                                setActiveSubcategoryKey('');
+                                setNavStep('worktimes');
+                                return;
+                              }
+
                               setActiveSubcategoryKey(firstSub);
                               setNavStep('subcategory');
                             }}

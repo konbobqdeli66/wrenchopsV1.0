@@ -93,6 +93,9 @@ export default function Orders({ t }) {
   const [notesText, setNotesText] = useState("");
   const [worktimeDetailsOpen, setWorktimeDetailsOpen] = useState(false);
   const [selectedOrderWorktime, setSelectedOrderWorktime] = useState(null);
+  // Per-order line manual pricing (used for "Свободни Операции")
+  const [priceDraft, setPriceDraft] = useState(0);
+  const [savingPrice, setSavingPrice] = useState(false);
   const [worktimeInfoOpen, setWorktimeInfoOpen] = useState(false);
   const [completeConfirmOpen, setCompleteConfirmOpen] = useState(false);
   const [completeLoading, setCompleteLoading] = useState(false);
@@ -139,6 +142,12 @@ export default function Orders({ t }) {
 
   const selectionCategories = getCategoriesForVehicleType(orderVehicleType);
 
+  const selectionCategoryHasSubcategories = useMemo(() => {
+    if (orderVehicleType === 'trailer') return false;
+    const list = getSubcategoriesForCategoryKey(orderVehicleType, worktimeCategoryKey);
+    return Array.isArray(list) && list.length > 0;
+  }, [orderVehicleType, worktimeCategoryKey]);
+
   const selectionSubcategories = useMemo(() => {
     if (orderVehicleType === 'trailer') return [];
     return getSubcategoriesForCategoryKey(orderVehicleType, worktimeCategoryKey);
@@ -146,18 +155,20 @@ export default function Orders({ t }) {
 
   const hasLegacyWorktimesInSelectedCategory = useMemo(() => {
     if (orderVehicleType === 'trailer') return false;
+    if (!selectionCategoryHasSubcategories) return false;
     return (availableWorktimes || []).some((w) => {
       if (getWorktimeCategoryKey(w, orderVehicleType) !== worktimeCategoryKey) return false;
       return !getWorktimeSubcategoryKey(w, orderVehicleType);
     });
-  }, [availableWorktimes, orderVehicleType, worktimeCategoryKey]);
+  }, [availableWorktimes, orderVehicleType, worktimeCategoryKey, selectionCategoryHasSubcategories]);
 
   const selectionSubcategoriesWithLegacy = useMemo(() => {
     if (orderVehicleType === 'trailer') return [];
+    if (!selectionCategoryHasSubcategories) return [];
     const base = Array.isArray(selectionSubcategories) ? selectionSubcategories : [];
     if (!hasLegacyWorktimesInSelectedCategory) return base;
     return [...base, { key: '__legacy__', no: '—', label: 'Неразпределени (стар тип)' }];
-  }, [orderVehicleType, selectionSubcategories, hasLegacyWorktimesInSelectedCategory]);
+  }, [orderVehicleType, selectionSubcategories, hasLegacyWorktimesInSelectedCategory, selectionCategoryHasSubcategories]);
 
   const countBySelectionSubcategoryKey = useMemo(() => {
     const map = {};
@@ -180,6 +191,7 @@ export default function Orders({ t }) {
       .filter((w) => getWorktimeCategoryKey(w, orderVehicleType) === worktimeCategoryKey)
       .filter((w) => {
         if (orderVehicleType === 'trailer') return true;
+        if (!selectionCategoryHasSubcategories) return true;
         if (!selectionSubcategoriesWithLegacy.length) return true;
 
         // Enforce: Main Group -> Subgroup -> Worktime
@@ -193,7 +205,7 @@ export default function Orders({ t }) {
         const catLabel = formatCategoryLabel(orderVehicleType, w.component_type);
         return `${w.title} ${w.component_type} ${catLabel}`.toLowerCase().includes(q);
       });
-  }, [availableWorktimes, orderVehicleType, worktimeCategoryKey, worktimeSubcategoryKey, worktimeSearch, selectionSubcategoriesWithLegacy.length]);
+  }, [availableWorktimes, orderVehicleType, worktimeCategoryKey, worktimeSubcategoryKey, worktimeSearch, selectionSubcategoriesWithLegacy.length, selectionCategoryHasSubcategories]);
 
   useEffect(() => {
     loadOrders();
@@ -286,9 +298,14 @@ export default function Orders({ t }) {
       const hours = Number(ow?.hours) || 0;
       const title = String(ow?.worktime_title || '').trim();
       const component = String(ow?.component_type || '').trim();
+      const unitPrice = Number(ow?.unit_price_bgn) || 0;
 
       if (!notes) {
-        const key = `${title}__${hours}__${component}`;
+        // For "Свободни Операции" we must include the unit price in the merge key.
+        // Otherwise rows with different prices would be incorrectly merged.
+        const key = component === 'free_ops'
+          ? `${title}__${hours}__${component}__${unitPrice}`
+          : `${title}__${hours}__${component}`;
         const idx = indexByKey.get(key);
         if (typeof idx === 'number') {
           out[idx] = { ...out[idx], quantity: (Number(out[idx]?.quantity) || 0) + qty };
@@ -344,7 +361,7 @@ export default function Orders({ t }) {
     setWorktimeSubcategoryKey(firstSubKey);
 
     loadOrderWorktimes(order.id);
-    loadAvailableWorktimes();
+    loadAvailableWorktimes(vt);
     setOrderDetailsOpen(true);
   };
 
@@ -368,10 +385,31 @@ export default function Orders({ t }) {
     }
   }
 
-  async function loadAvailableWorktimes() {
+  async function loadAvailableWorktimes(vehicleTypeOverride = null) {
     try {
-      const res = await axios.get(`${getApiBaseUrl()}/worktimes`);
-      setAvailableWorktimes(res.data);
+      // Load standard worktimes (permission-gated) + free operations (available for ALL authenticated users).
+      const vt = vehicleTypeOverride || orderVehicleType || 'truck';
+
+      const stdPromise = axios.get(
+        `${getApiBaseUrl()}/worktimes?vehicle_type=${encodeURIComponent(vt)}`
+      );
+      const freePromise = axios.get(
+        `${getApiBaseUrl()}/worktimes/free_ops?vehicle_type=${encodeURIComponent(vt)}`
+      );
+
+      const [stdRes, freeRes] = await Promise.allSettled([stdPromise, freePromise]);
+
+      const std = stdRes.status === 'fulfilled' ? (Array.isArray(stdRes.value.data) ? stdRes.value.data : []) : [];
+      const free = freeRes.status === 'fulfilled' ? (Array.isArray(freeRes.value.data) ? freeRes.value.data : []) : [];
+
+      // Merge, de-duplicate by id (free ops are stored in the same table).
+      const byId = new Map();
+      [...std, ...free].forEach((w) => {
+        if (!w?.id) return;
+        byId.set(w.id, w);
+      });
+
+      setAvailableWorktimes(Array.from(byId.values()));
     } catch (error) {
       setAvailableWorktimes([]);
     }
@@ -380,6 +418,12 @@ export default function Orders({ t }) {
   // Keep the selected subgroup valid when category/vehicle type changes.
   useEffect(() => {
     if (orderVehicleType === 'trailer') {
+      if (worktimeSubcategoryKey) setWorktimeSubcategoryKey('');
+      return;
+    }
+
+    // Categories without subcategories (e.g. free operations) should not force a subcategory.
+    if (!selectionCategoryHasSubcategories) {
       if (worktimeSubcategoryKey) setWorktimeSubcategoryKey('');
       return;
     }
@@ -399,7 +443,7 @@ export default function Orders({ t }) {
     if (!keys.has(worktimeSubcategoryKey)) {
       setWorktimeSubcategoryKey(firstSub);
     }
-  }, [orderVehicleType, worktimeCategoryKey, worktimeSubcategoryKey]);
+  }, [orderVehicleType, worktimeCategoryKey, worktimeSubcategoryKey, selectionCategoryHasSubcategories]);
 
   async function loadOrderWorktimes(orderId) {
     try {
@@ -443,23 +487,33 @@ export default function Orders({ t }) {
   }
 
   async function createNewWorktime() {
-    if (!newWorktimeForm.title.trim() || !newWorktimeForm.hours || !newWorktimeForm.component_type) {
-      alert('Моля попълнете всички полета: Наименование, Часове и Компонент');
+    const isFreeOps = String(newWorktimeForm.component_type || '').trim() === 'free_ops';
+
+    if (!newWorktimeForm.title.trim() || !newWorktimeForm.component_type) {
+      alert('Моля попълнете всички полета: Наименование и Категория');
+      return;
+    }
+    if (!isFreeOps && !newWorktimeForm.hours) {
+      alert('Моля попълнете всички полета: Нормовреме (часове)');
       return;
     }
 
-    const componentTypeForSave =
-      orderVehicleType === 'trailer'
-        ? newWorktimeForm.component_type
-        : (String(newWorktimeForm.subcomponent_type || '').trim() || newWorktimeForm.component_type);
-
     try {
-      const response = await axios.post(`${getApiBaseUrl()}/worktimes`, {
-        title: newWorktimeForm.title,
-        hours: newWorktimeForm.hours,
-        component_type: componentTypeForSave,
-        vehicle_type: orderVehicleType,
-      });
+      const response = isFreeOps
+        ? await axios.post(`${getApiBaseUrl()}/worktimes/free_ops`, {
+            title: newWorktimeForm.title,
+            vehicle_type: orderVehicleType,
+          })
+        : await axios.post(`${getApiBaseUrl()}/worktimes`, {
+            title: newWorktimeForm.title,
+            hours: newWorktimeForm.hours,
+            component_type:
+              orderVehicleType === 'trailer'
+                ? newWorktimeForm.component_type
+                : (String(newWorktimeForm.subcomponent_type || '').trim() || newWorktimeForm.component_type),
+            vehicle_type: orderVehicleType,
+          });
+
       // Reload worktimes to include the new one
       await loadAvailableWorktimes();
       // Auto-select the newly created worktime
@@ -495,6 +549,7 @@ export default function Orders({ t }) {
 
   const openOrderWorktimeDetails = (ow) => {
     setSelectedOrderWorktime(ow);
+    setPriceDraft(Number(ow?.unit_price_bgn) || 0);
     setWorktimeDetailsOpen(true);
   };
 
@@ -522,6 +577,36 @@ export default function Orders({ t }) {
     setNotesDialogOpen(false);
     setEditingWorktime(null);
     setNotesText("");
+  };
+
+  const saveFreeOpsPrice = async () => {
+    if (!selectedOrder?.id || !selectedOrderWorktime?.id) return;
+    const isFreeOps = String(selectedOrderWorktime?.component_type || '').trim() === 'free_ops';
+    if (!isFreeOps) return;
+
+    const parsed = Number(String(priceDraft ?? '').replace(',', '.'));
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      alert('Моля въведете валидна цена (> 0 лв) за „Свободни Операции“.');
+      return;
+    }
+
+    try {
+      setSavingPrice(true);
+      const res = await axios.put(
+        `${getApiBaseUrl()}/orders/${selectedOrder.id}/worktimes/${selectedOrderWorktime.id}`,
+        { unit_price_bgn: parsed }
+      );
+
+      const updated = res?.data;
+      if (updated && updated.id) {
+        setSelectedOrderWorktime((prev) => (prev && prev.id === updated.id ? updated : prev));
+      }
+      await loadOrderWorktimes(selectedOrder.id);
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Грешка при запис на цена.');
+    } finally {
+      setSavingPrice(false);
+    }
   };
 
   return (
@@ -991,6 +1076,8 @@ export default function Orders({ t }) {
             <List dense sx={{ p: 0 }}>
               {displayedOrderWorktimes.map((ow, index) => {
                 const totalHours = (ow.hours || 0) * (ow.quantity || 0);
+                const isFreeOps = String(ow?.component_type || '').trim() === 'free_ops';
+                const unitPrice = Number(ow?.unit_price_bgn) || 0;
                 return (
                   <div key={ow.id}>
                     <ListItem
@@ -1029,8 +1116,21 @@ export default function Orders({ t }) {
                                 size="small"
                                 variant="outlined"
                               />
-                              <Chip label={`${ow.hours}ч`} size="small" variant="outlined" />
+                              {isFreeOps ? (
+                                <Chip label="Без нормовреме" size="small" variant="outlined" />
+                              ) : (
+                                <Chip label={`${ow.hours}ч`} size="small" variant="outlined" />
+                              )}
                               <Chip label={`x${ow.quantity}`} size="small" variant="outlined" />
+                              {isFreeOps ? (
+                                <Chip
+                                  label={unitPrice > 0 ? `Цена: ${unitPrice.toFixed(2)} лв` : 'Липсва цена'}
+                                  size="small"
+                                  color={unitPrice > 0 ? 'success' : 'error'}
+                                  variant={unitPrice > 0 ? 'outlined' : 'filled'}
+                                  sx={{ fontWeight: 900 }}
+                                />
+                              ) : null}
                               {ow.notes ? (
                                 <StickyNote2Icon
                                   titleAccess="Има бележка"
@@ -1143,6 +1243,10 @@ export default function Orders({ t }) {
         </DialogTitle>
         <DialogContent>
           {selectedOrderWorktime && (
+            (() => {
+              const isFreeOps = String(selectedOrderWorktime?.component_type || '').trim() === 'free_ops';
+              const unitPrice = Number(selectedOrderWorktime?.unit_price_bgn) || 0;
+              return (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
               <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                 <Chip label={`Компонент: ${selectedOrderWorktime.component_type}`} size="small" />
@@ -1150,7 +1254,11 @@ export default function Orders({ t }) {
                   label={`Категория: ${formatCategoryLabel(orderVehicleType, selectedOrderWorktime.component_type)}`}
                   size="small"
                 />
-                <Chip label={`Време: ${selectedOrderWorktime.hours}ч`} size="small" />
+                {isFreeOps ? (
+                  <Chip label="Без нормовреме" size="small" />
+                ) : (
+                  <Chip label={`Време: ${selectedOrderWorktime.hours}ч`} size="small" />
+                )}
                 <Chip label={`Количество: x${selectedOrderWorktime.quantity}`} size="small" />
                 <Chip
                   label={`Общо: ${(selectedOrderWorktime.hours * selectedOrderWorktime.quantity).toFixed(2).replace(/\.00$/, '')}ч`}
@@ -1158,7 +1266,43 @@ export default function Orders({ t }) {
                   color="primary"
                   sx={{ fontWeight: 800 }}
                 />
+                {isFreeOps ? (
+                  <Chip
+                    label={unitPrice > 0 ? `Цена: ${unitPrice.toFixed(2)} лв` : 'Липсва цена'}
+                    size="small"
+                    color={unitPrice > 0 ? 'success' : 'error'}
+                    variant={unitPrice > 0 ? 'outlined' : 'filled'}
+                    sx={{ fontWeight: 900 }}
+                  />
+                ) : null}
               </Box>
+
+              {isFreeOps ? (
+                <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 900, mb: 0.75 }}>
+                    Цена за фактуриране (ед. цена)
+                  </Typography>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                    <TextField
+                      label="Ед. цена (лв) *"
+                      type="number"
+                      size="small"
+                      value={priceDraft}
+                      onChange={(e) => setPriceDraft(e.target.value)}
+                      inputProps={{ min: 0, step: '0.01' }}
+                      sx={{ width: { xs: '100%', sm: 220 } }}
+                      helperText='Задължително поле за „Свободни Операции“. Фактуриране няма да е възможно без цена.'
+                    />
+                    <Button
+                      variant="contained"
+                      onClick={saveFreeOpsPrice}
+                      disabled={savingPrice}
+                    >
+                      {savingPrice ? 'Запис...' : 'Запази цена'}
+                    </Button>
+                  </Stack>
+                </Paper>
+              ) : null}
               <Box>
                 <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 0.5 }}>
                   Бележки
@@ -1170,6 +1314,8 @@ export default function Orders({ t }) {
                 </Paper>
               </Box>
             </Box>
+              );
+            })()
           )}
         </DialogContent>
         <DialogActions>
@@ -1319,8 +1465,14 @@ export default function Orders({ t }) {
                             return;
                           }
 
-                          const firstSub =
-                            getSubcategoriesForCategoryKey(orderVehicleType, cat.key)[0]?.key || '';
+                          const list = getSubcategoriesForCategoryKey(orderVehicleType, cat.key);
+                          const firstSub = list[0]?.key || '';
+                          if (!list.length) {
+                            setWorktimeSubcategoryKey('');
+                            setWorktimeNavStep('worktimes');
+                            return;
+                          }
+
                           setWorktimeSubcategoryKey(firstSub);
                           setWorktimeNavStep('subcategory');
                         }}
@@ -1767,6 +1919,10 @@ export default function Orders({ t }) {
         </DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>
+            {(() => {
+              const isFreeOps = String(newWorktimeForm.component_type || '').trim() === 'free_ops';
+              return (
+                <>
             <Grid item xs={12}>
               <FormControl fullWidth variant="outlined">
                 <InputLabel>Категория *</InputLabel>
@@ -1799,7 +1955,7 @@ export default function Orders({ t }) {
               </FormControl>
             </Grid>
 
-            {orderVehicleType !== 'trailer' ? (
+            {orderVehicleType !== 'trailer' && !isFreeOps ? (
               <Grid item xs={12}>
                 <FormControl fullWidth variant="outlined">
                   <InputLabel>Подгрупа</InputLabel>
@@ -1830,16 +1986,25 @@ export default function Orders({ t }) {
             <Grid item xs={12}>
               <TextField
                 fullWidth
-                label="Нормовреме (часове) *"
+                label={isFreeOps ? 'Нормовреме (часове)' : 'Нормовреме (часове) *'}
                 value={newWorktimeForm.hours}
                 onChange={(e) => setNewWorktimeForm({ ...newWorktimeForm, hours: e.target.value })}
                 variant="outlined"
                 type="number"
                 step="0.1"
                 inputProps={{ min: 0 }}
-                required
+                required={!isFreeOps}
+                disabled={isFreeOps}
+                helperText={
+                  isFreeOps
+                    ? 'За „Свободни Операции“ не се задава нормовреме. Цената се определя при фактуриране.'
+                    : ''
+                }
               />
             </Grid>
+                </>
+              );
+            })()}
           </Grid>
         </DialogContent>
         <DialogActions>

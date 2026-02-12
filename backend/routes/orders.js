@@ -33,6 +33,8 @@ process.on('exit', () => {
 
 const padLeft = (num, len) => String(num ?? '').padStart(len, '0');
 
+const FREE_OPS_COMPONENT_TYPE = 'free_ops';
+
 // Всички активни поръчки
 router.get('/', checkPermission('orders', 'read'), (req, res) => {
     db.all(
@@ -67,9 +69,80 @@ router.get('/completed', checkPermission('orders', 'read'), (req, res) => {
           SELECT
             o.*,
             COALESCE(SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0)), 0) AS total_hours,
-            (COALESCE(SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0)), 0) * COALESCE((SELECT hourly_rate FROM company_settings WHERE id = 1), 100) * COALESCE(od.mult_out_of_hours, 1) * COALESCE(od.mult_holiday, 1) * COALESCE(od.mult_out_of_service, 1)) AS tax_base_bgn,
-            ((COALESCE(SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0)), 0) * COALESCE((SELECT hourly_rate FROM company_settings WHERE id = 1), 100) * COALESCE(od.mult_out_of_hours, 1) * COALESCE(od.mult_holiday, 1) * COALESCE(od.mult_out_of_service, 1)) * (COALESCE((SELECT vat_rate FROM company_settings WHERE id = 1), 20) / 100.0)) AS vat_amount_bgn,
-            ((COALESCE(SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0)), 0) * COALESCE((SELECT hourly_rate FROM company_settings WHERE id = 1), 100) * COALESCE(od.mult_out_of_hours, 1) * COALESCE(od.mult_holiday, 1) * COALESCE(od.mult_out_of_service, 1)) * (1.0 + (COALESCE((SELECT vat_rate FROM company_settings WHERE id = 1), 20) / 100.0))) AS total_amount_bgn
+            -- Manual priced items (free ops) are not based on hours.
+            COALESCE(
+              SUM(
+                CASE
+                  WHEN COALESCE(w.component_type, '') = '${FREE_OPS_COMPONENT_TYPE}'
+                    THEN COALESCE(ow.unit_price_bgn, 0) * COALESCE(ow.quantity, 0)
+                  ELSE 0
+                END
+              ),
+              0
+            ) AS free_ops_amount_bgn,
+            (
+              (COALESCE(SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0)), 0)
+                * COALESCE((SELECT hourly_rate FROM company_settings WHERE id = 1), 100)
+                * COALESCE(od.mult_out_of_hours, 1)
+                * COALESCE(od.mult_holiday, 1)
+                * COALESCE(od.mult_out_of_service, 1)
+              )
+              +
+              COALESCE(
+                SUM(
+                  CASE
+                    WHEN COALESCE(w.component_type, '') = '${FREE_OPS_COMPONENT_TYPE}'
+                      THEN COALESCE(ow.unit_price_bgn, 0) * COALESCE(ow.quantity, 0)
+                    ELSE 0
+                  END
+                ),
+                0
+              )
+            ) AS tax_base_bgn,
+            (
+              (
+                (COALESCE(SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0)), 0)
+                  * COALESCE((SELECT hourly_rate FROM company_settings WHERE id = 1), 100)
+                  * COALESCE(od.mult_out_of_hours, 1)
+                  * COALESCE(od.mult_holiday, 1)
+                  * COALESCE(od.mult_out_of_service, 1)
+                )
+                +
+                COALESCE(
+                  SUM(
+                    CASE
+                      WHEN COALESCE(w.component_type, '') = '${FREE_OPS_COMPONENT_TYPE}'
+                        THEN COALESCE(ow.unit_price_bgn, 0) * COALESCE(ow.quantity, 0)
+                      ELSE 0
+                    END
+                  ),
+                  0
+                )
+              )
+              * (COALESCE((SELECT vat_rate FROM company_settings WHERE id = 1), 20) / 100.0)
+            ) AS vat_amount_bgn,
+            (
+              (
+                (COALESCE(SUM(COALESCE(w.hours, 0) * COALESCE(ow.quantity, 0)), 0)
+                  * COALESCE((SELECT hourly_rate FROM company_settings WHERE id = 1), 100)
+                  * COALESCE(od.mult_out_of_hours, 1)
+                  * COALESCE(od.mult_holiday, 1)
+                  * COALESCE(od.mult_out_of_service, 1)
+                )
+                +
+                COALESCE(
+                  SUM(
+                    CASE
+                      WHEN COALESCE(w.component_type, '') = '${FREE_OPS_COMPONENT_TYPE}'
+                        THEN COALESCE(ow.unit_price_bgn, 0) * COALESCE(ow.quantity, 0)
+                      ELSE 0
+                    END
+                  ),
+                  0
+                )
+              )
+              * (1.0 + (COALESCE((SELECT vat_rate FROM company_settings WHERE id = 1), 20) / 100.0))
+            ) AS total_amount_bgn
           FROM orders o
           LEFT JOIN order_worktimes ow ON ow.order_id = o.id
           LEFT JOIN worktimes w ON w.id = ow.worktime_id
@@ -269,6 +342,40 @@ router.post('/:id/documents/reserve', checkPermission('orders', 'write'), (req, 
                         return res.status(500).json({ error: err.message });
                     }
 
+                    // Enforce pricing for any "free_ops" items before invoicing.
+                    // IMPORTANT: This must block invoicing if unit_price_bgn is missing/zero.
+                    db.all(
+                        `
+                          SELECT ow.id, ow.quantity, ow.unit_price_bgn, w.title
+                          FROM order_worktimes ow
+                          JOIN worktimes w ON w.id = ow.worktime_id
+                          WHERE ow.order_id = ? AND COALESCE(w.component_type, '') = ?
+                        `,
+                        [orderId, FREE_OPS_COMPONENT_TYPE],
+                        (priceErr, freeRows) => {
+                            if (priceErr) {
+                                db.run('ROLLBACK');
+                                return res.status(500).json({ error: priceErr.message });
+                            }
+
+                            const missing = (freeRows || []).filter((r) => {
+                                const qty = Number(r?.quantity) || 0;
+                                const price = Number(r?.unit_price_bgn);
+                                // If qty is 0 (shouldn't happen), ignore. Otherwise require price > 0.
+                                return qty > 0 && (!Number.isFinite(price) || price <= 0);
+                            });
+
+                            if (missing.length) {
+                                db.run('ROLLBACK');
+                                return res.status(400).json({
+                                    error: 'Липсва цена за една или повече "Свободни Операции". Въведете цена и опитайте отново.',
+                                    missing_free_ops: missing.map((m) => ({
+                                        order_worktime_id: m.id,
+                                        title: m.title,
+                                    })),
+                                });
+                            }
+
                     const invoicePrefix = settings?.invoice_prefix ?? '09';
                     const invoicePadLength = Math.max(1, parseInt(settings?.invoice_pad_length, 10) || 8);
                     const lastInvoice = parseInt(settings?.invoice_last_number, 10) || 0;
@@ -339,6 +446,8 @@ router.post('/:id/documents/reserve', checkPermission('orders', 'write'), (req, 
                                     );
                                 }
                             );
+                        }
+                    );
                         }
                     );
                 }
@@ -487,7 +596,9 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
               SELECT
                 w.title as worktime_title,
                 w.hours,
+                w.component_type,
                 ow.quantity,
+                ow.unit_price_bgn,
                 ow.notes
               FROM order_worktimes ow
               JOIN worktimes w ON ow.worktime_id = w.id
@@ -497,8 +608,20 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
             [orderId]
         );
 
-        const totalHours = worktimeRows.reduce(
+        const laborRows = (worktimeRows || []).filter(
+            (r) => String(r?.component_type || '').trim() !== FREE_OPS_COMPONENT_TYPE
+        );
+        const freeOpsRows = (worktimeRows || []).filter(
+            (r) => String(r?.component_type || '').trim() === FREE_OPS_COMPONENT_TYPE
+        );
+
+        const totalHours = laborRows.reduce(
             (sum, r) => sum + (Number(r.hours) || 0) * (Number(r.quantity) || 0),
+            0
+        );
+
+        const freeOpsNet = freeOpsRows.reduce(
+            (sum, r) => sum + (Number(r.unit_price_bgn) || 0) * (Number(r.quantity) || 0),
             0
         );
 
@@ -513,7 +636,8 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
             (Number(docs?.mult_holiday) || 1) *
             (Number(docs?.mult_out_of_service) || 1);
 
-        const taxBase = totalHours * hourlyRate * multiplier;
+        const laborTaxBase = totalHours * hourlyRate * multiplier;
+        const taxBase = laborTaxBase + freeOpsNet;
         const vatAmount = taxBase * (vatRate / 100);
         const totalAmount = taxBase + vatAmount;
 
@@ -538,17 +662,40 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
             ? `<img src="${escapeHtml(company.logo_data_url)}" style="max-width:110px; max-height:110px; object-fit:contain;" />`
             : '';
 
-        const invoiceRowHtml = `
+        const laborRowHtml = `
           <tr>
             <td style="text-align:center">1</td>
             <td>Ремонт на превозно средство с регистрационен номер ${escapeHtml(order?.reg_number || '')} съгласно работна карта: ${escapeHtml(docs?.protocol_no || '')}</td>
             <td>${escapeHtml(order?.reg_number || '')}</td>
             <td style="text-align:right">1</td>
-            <td style="text-align:right">${taxBase.toFixed(2)}</td>
+            <td style="text-align:right">${laborTaxBase.toFixed(2)}</td>
             <td style="text-align:right">${vatRate.toFixed(2)}%</td>
-            <td style="text-align:right">${taxBase.toFixed(2)}</td>
+            <td style="text-align:right">${laborTaxBase.toFixed(2)}</td>
           </tr>
         `;
+
+        const freeOpsRowsHtml = (freeOpsRows || [])
+            .filter((r) => (Number(r?.quantity) || 0) > 0)
+            .map((r, i) => {
+                const rowNo = i + 2;
+                const qty = Number(r?.quantity) || 0;
+                const unit = Number(r?.unit_price_bgn) || 0;
+                const lineNet = qty * unit;
+                return `
+                  <tr>
+                    <td style="text-align:center">${rowNo}</td>
+                    <td>${escapeHtml(`Свободни Операции: ${r?.worktime_title || ''}`)}</td>
+                    <td>${escapeHtml(order?.reg_number || '')}</td>
+                    <td style="text-align:right">${qty}</td>
+                    <td style="text-align:right">${unit.toFixed(2)}</td>
+                    <td style="text-align:right">${vatRate.toFixed(2)}%</td>
+                    <td style="text-align:right">${lineNet.toFixed(2)}</td>
+                  </tr>
+                `;
+            })
+            .join('');
+
+        const invoiceRowsHtml = `${laborRowHtml}${freeOpsRowsHtml}`;
 
         const invoiceHtml = `<!doctype html>
 <html>
@@ -622,7 +769,7 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
         </tr>
       </thead>
       <tbody>
-        ${invoiceRowHtml}
+        ${invoiceRowsHtml}
         <tr>
           <td colspan="6" class="right" style="font-weight:700;">Данъчна основа (${vatRate.toFixed(2)} %):</td>
           <td class="right" style="font-weight:700;">${fmtBgnEur(taxBase)}</td>
@@ -660,6 +807,7 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
 
         const protocolRowsHtml = (worktimeRows || [])
             .map((r, idx) => {
+                const isFree = String(r?.component_type || '').trim() === FREE_OPS_COMPONENT_TYPE;
                 const h = Number(r.hours) || 0;
                 const q = Number(r.quantity) || 0;
                 const total = h * q;
@@ -669,9 +817,9 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
                     <td style="text-align:center">${idx + 1}</td>
                     <td>${escapeHtml(r.worktime_title || '')}</td>
                     <td style="white-space: pre-wrap;">${notes}</td>
-                    <td style="text-align:right">${h.toFixed(2).replace(/\.00$/, '')}</td>
+                    <td style="text-align:right">${isFree ? '—' : h.toFixed(2).replace(/\.00$/, '')}</td>
                     <td style="text-align:right">${q}</td>
-                    <td style="text-align:right">${total.toFixed(2).replace(/\.00$/, '')}</td>
+                    <td style="text-align:right">${isFree ? '—' : total.toFixed(2).replace(/\.00$/, '')}</td>
                   </tr>
                 `;
             })
@@ -869,11 +1017,11 @@ router.post('/:orderId/worktimes', checkPermission('orders', 'write'), (req, res
                             }
                             db.get(
                                 `
-                                    SELECT ow.*, w.title as worktime_title, w.hours, w.component_type
-                                    FROM order_worktimes ow
-                                    JOIN worktimes w ON ow.worktime_id = w.id
-                                    WHERE ow.id = ?
-                                `,
+                                     SELECT ow.*, w.title as worktime_title, w.hours, w.component_type
+                                     FROM order_worktimes ow
+                                     JOIN worktimes w ON ow.worktime_id = w.id
+                                     WHERE ow.id = ?
+                                 `,
                                 [existing.id],
                                 (getErr, row) => {
                                     if (getErr) {
@@ -897,11 +1045,11 @@ router.post('/:orderId/worktimes', checkPermission('orders', 'write'), (req, res
                         }
                         db.get(
                             `
-                                SELECT ow.*, w.title as worktime_title, w.hours, w.component_type
-                                FROM order_worktimes ow
-                                JOIN worktimes w ON ow.worktime_id = w.id
-                                WHERE ow.id = ?
-                            `,
+                                 SELECT ow.*, w.title as worktime_title, w.hours, w.component_type
+                                 FROM order_worktimes ow
+                                 JOIN worktimes w ON ow.worktime_id = w.id
+                                 WHERE ow.id = ?
+                             `,
                             [this.lastID],
                             (getErr, row) => {
                                 if (getErr) {
@@ -964,13 +1112,22 @@ router.get('/:orderId/worktimes', checkPermission('orders', 'read'), (req, res) 
 // Обновяване на бележки за нормовреме в поръчка
 router.put('/:orderId/worktimes/:worktimeId', checkPermission('orders', 'write'), (req, res) => {
     const { orderId, worktimeId } = req.params;
-    const { notes, quantity } = req.body;
+    const { notes, quantity, unit_price_bgn } = req.body;
 
     const qty = quantity === undefined || quantity === null ? null : Math.max(1, parseInt(quantity, 10) || 1);
 
+    const parsedUnitPrice =
+        unit_price_bgn === undefined || unit_price_bgn === null
+            ? null
+            : Number(String(unit_price_bgn).replace(',', '.'));
+
+    if (parsedUnitPrice !== null && (!Number.isFinite(parsedUnitPrice) || parsedUnitPrice < 0)) {
+        return res.status(400).json({ error: 'unit_price_bgn must be a non-negative number' });
+    }
+
     db.run(
-        'UPDATE order_worktimes SET notes = COALESCE(?, notes), quantity = COALESCE(?, quantity) WHERE order_id = ? AND id = ?',
-        [notes === undefined ? null : (notes || ''), qty, orderId, worktimeId],
+        'UPDATE order_worktimes SET notes = COALESCE(?, notes), quantity = COALESCE(?, quantity), unit_price_bgn = COALESCE(?, unit_price_bgn) WHERE order_id = ? AND id = ?',
+        [notes === undefined ? null : (notes || ''), qty, parsedUnitPrice, orderId, worktimeId],
         function(err) {
             if (err) {
                 res.status(500).json({ error: err.message });

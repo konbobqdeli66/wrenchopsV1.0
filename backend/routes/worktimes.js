@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
-const { checkPermission } = require('../middleware/permissions');
+const { checkPermission, verifyToken } = require('../middleware/permissions');
 
 const XLSX = require('xlsx');
 const multer = require('multer');
@@ -32,6 +32,28 @@ const allAsync = (sql, params = []) =>
   });
 
 const normalize = (v) => String(v ?? '').trim();
+
+// Authentication (any active user with a valid JWT)
+const authenticateToken = (req, res, next) => {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!token) {
+    return res.status(401).json({ error: 'No token provided' });
+  }
+
+  verifyToken(token, (verifyErr, decoded) => {
+    if (verifyErr) {
+      const isRevoked = verifyErr.code === 'TOKEN_REVOKED';
+      const isInactive = verifyErr.code === 'USER_INACTIVE';
+      return res.status(401).json({
+        error: isRevoked ? 'Session expired' : isInactive ? 'Account inactive' : 'Invalid token',
+      });
+    }
+    req.user = decoded;
+    next();
+  });
+};
+
+const FREE_OPS_COMPONENT_TYPE = 'free_ops';
 
 const WORKTIME_HEADERS_BG_V1 = ['ID', 'Заглавие*', 'Часове*', 'Компонент'];
 const WORKTIME_HEADERS_BG_V2 = ['ID', 'Заглавие*', 'Часове*', 'Компонент', 'Тип'];
@@ -83,6 +105,112 @@ router.get('/', checkPermission('worktimes', 'read'), (req, res) => {
         }
         res.json(rows);
     });
+});
+
+// --- Free operations (editable by ALL authenticated users) ---
+// These are stored in the same table (worktimes) with component_type = 'free_ops' and hours = 0.
+router.get('/free_ops', authenticateToken, (req, res) => {
+  const vt = String(req.query.vehicle_type || '').trim().toLowerCase();
+  const isValidVt = vt === 'truck' || vt === 'trailer';
+  const sql =
+    'SELECT * FROM worktimes WHERE component_type = ?' + (isValidVt ? ' AND vehicle_type = ?' : '');
+  const params = isValidVt ? [FREE_OPS_COMPONENT_TYPE, vt] : [FREE_OPS_COMPONENT_TYPE];
+
+  db.all(sql, params, (err, rows) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    return res.json(rows || []);
+  });
+});
+
+router.post('/free_ops', authenticateToken, (req, res) => {
+  const { title, vehicle_type } = req.body || {};
+  const cleanTitle = normalize(title);
+
+  if (!cleanTitle) {
+    return res.status(400).json({ error: 'title is required' });
+  }
+
+  const vt = String(vehicle_type || '').trim().toLowerCase();
+  const safeVehicleType = vt === 'trailer' ? 'trailer' : 'truck';
+
+  db.run(
+    'INSERT INTO worktimes (title, hours, component_type, vehicle_type) VALUES (?, ?, ?, ?)',
+    [cleanTitle, 0, FREE_OPS_COMPONENT_TYPE, safeVehicleType],
+    function (err) {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      db.get('SELECT * FROM worktimes WHERE id = ?', [this.lastID], (getErr, row) => {
+        if (getErr) {
+          return res.status(500).json({ error: getErr.message });
+        }
+        return res.json(row);
+      });
+    }
+  );
+});
+
+router.put('/free_ops/:id', authenticateToken, (req, res) => {
+  const id = Number(req.params.id);
+  const { title, vehicle_type } = req.body || {};
+  const cleanTitle = normalize(title);
+  const vt = String(vehicle_type || '').trim().toLowerCase();
+  const safeVehicleType = vt ? (vt === 'trailer' ? 'trailer' : 'truck') : null;
+
+  if (!Number.isFinite(id) || id <= 0) {
+    return res.status(400).json({ error: 'Invalid id' });
+  }
+  if (!cleanTitle && !safeVehicleType) {
+    return res.status(400).json({ error: 'Nothing to update' });
+  }
+
+  db.run(
+    `UPDATE worktimes
+     SET
+       title = COALESCE(?, title),
+       vehicle_type = COALESCE(?, vehicle_type),
+       hours = 0,
+       component_type = ?
+     WHERE id = ? AND component_type = ?`,
+    [cleanTitle || null, safeVehicleType, FREE_OPS_COMPONENT_TYPE, id, FREE_OPS_COMPONENT_TYPE],
+    function (err) {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      if (this.changes === 0) {
+        return res.status(404).json({ error: 'Free operation not found' });
+      }
+      db.get('SELECT * FROM worktimes WHERE id = ?', [id], (getErr, row) => {
+        if (getErr) {
+          return res.status(500).json({ error: getErr.message });
+        }
+        return res.json(row);
+      });
+    }
+  );
+});
+
+router.delete('/free_ops/:id', authenticateToken, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) {
+    return res.status(400).json({ error: 'Invalid id' });
+  }
+
+  db.run(
+    'DELETE FROM worktimes WHERE id = ? AND component_type = ?',
+    [id, FREE_OPS_COMPONENT_TYPE],
+    function (err) {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      if (this.changes === 0) {
+        return res.status(404).json({ error: 'Free operation not found' });
+      }
+      return res.json({ message: 'Free operation deleted.' });
+    }
+  );
 });
 
 // --- XLSX (template/export/import) ---
@@ -225,9 +353,27 @@ router.post('/', checkPermission('worktimes', 'write'), (req, res) => {
     const vt = String(vehicle_type || '').trim().toLowerCase();
     const safeVehicleType = vt === 'trailer' ? 'trailer' : 'truck';
 
+    const cleanTitle = normalize(title);
+    const componentTypeRaw = normalize(component_type) || 'cabin';
+
+    // Free operations templates can be created from the main worktimes endpoint too.
+    // Rule: when component_type is 'free_ops', hours are OPTIONAL and always stored as 0.
+    // All other worktimes require a valid non-negative hours value.
+    const isFreeOps = componentTypeRaw === FREE_OPS_COMPONENT_TYPE;
+    const parsedHours = isFreeOps ? 0 : Number(String(hours ?? '').replace(',', '.'));
+
+    if (!cleanTitle) {
+      return res.status(400).json({ error: 'title is required' });
+    }
+    if (!isFreeOps) {
+      if (!Number.isFinite(parsedHours) || parsedHours < 0) {
+        return res.status(400).json({ error: 'hours must be a non-negative number' });
+      }
+    }
+
     db.run(
         'INSERT INTO worktimes (title, hours, component_type, vehicle_type) VALUES (?, ?, ?, ?)',
-        [title, hours, component_type || 'cabin', safeVehicleType],
+        [cleanTitle, parsedHours, componentTypeRaw, safeVehicleType],
         function(err) {
             if (err) {
                 res.status(500).json({ error: err.message });
