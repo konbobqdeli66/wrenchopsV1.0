@@ -1089,15 +1089,17 @@ export default function Invoices({ canDeleteInvoices = false }) {
               <div class="line"><span></span><span><strong>${escapeHtml(company.bank_name)}${company.bic ? `, BIC: ${escapeHtml(company.bic)}` : ''}</strong></span></div>
               <div class="line"><span></span><span><strong>${escapeHtml(company.iban)}</strong></span></div>
             </div>
-            <div style="flex:1;" class="summary">
-               <div class="line"><span><strong>Общо часове:</strong></span><span><strong>${protocolTotalHours.toFixed(2).replace(/\.00$/, '')} ч.</strong></span></div>
+             <div style="flex:1;" class="summary">
+               <div class="line"><span><strong>Труд (часове):</strong></span><span><strong>${totalHours.toFixed(2).replace(/\.00$/, '')} ч.</strong></span></div>
+               <div class="line"><span><strong>Свободни операции (екв. часове):</strong></span><span><strong>${freeOpsHoursEqTotal.toFixed(2).replace(/\.00$/, '')} ч.</strong></span></div>
                <div class="line"><span><strong>Цена на час:</strong></span><span><strong>${fmtBgnEur(effectiveHourlyRate)}</strong></span></div>
-                <div class="line"><span><strong>Свободни операции (без ДДС):</strong></span><span><strong>${fmtBgnEur(freeOpsNet)}</strong></span></div>
-                <div class="line"><span><strong>Общо без ДДС:</strong></span><span><strong>${fmtBgnEur(taxBase)}</strong></span></div>
-                <div class="line"><span><strong>ДДС:</strong></span><span><strong>${fmtBgnEur(vatAmount)}</strong></span></div>
-                <div class="line"><span><strong>За плащане:</strong></span><span><strong>${fmtBgnEur(totalAmount)}</strong></span></div>
+               <div class="line"><span><strong>Труд (без ДДС):</strong></span><span><strong>${fmtBgnEur(laborTaxBase)}</strong></span></div>
+               <div class="line"><span><strong>Свободни операции (без ДДС):</strong></span><span><strong>${fmtBgnEur(freeOpsNet)}</strong></span></div>
+               <div class="line"><span><strong>Сума без ДДС:</strong></span><span><strong>${fmtBgnEur(taxBase)}</strong></span></div>
+               <div class="line"><span><strong>ДДС:</strong></span><span><strong>${fmtBgnEur(vatAmount)}</strong></span></div>
+               <div class="line"><span><strong>За плащане:</strong></span><span><strong>${fmtBgnEur(totalAmount)}</strong></span></div>
              </div>
-           </div>
+            </div>
 
           <div style="display:flex; justify-content: flex-end; margin-top: 10mm;">
             <div style="min-width: 80mm; text-align: left;">
@@ -1172,7 +1174,7 @@ export default function Invoices({ canDeleteInvoices = false }) {
               <tbody>
                 ${invoiceRowsHtml || '<tr><td colspan="7" class="muted">Няма редове</td></tr>'}
                 <tr>
-                  <td colspan="6" style="text-align:right; font-weight:700;">Данъчна основа (${vatRate.toFixed(2)} %):</td>
+                  <td colspan="6" style="text-align:right; font-weight:700;">Данъчна основа (без ДДС):</td>
                   <td style="text-align:right; font-weight:700;">${fmtBgnEur(taxBase)}</td>
                 </tr>
                 <tr>

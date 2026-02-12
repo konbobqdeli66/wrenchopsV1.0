@@ -762,7 +762,7 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
       <tbody>
         ${invoiceRowsHtml}
         <tr>
-          <td colspan="6" class="right" style="font-weight:700;">Данъчна основа (${vatRate.toFixed(2)} %):</td>
+          <td colspan="6" class="right" style="font-weight:700;">Данъчна основа (без ДДС):</td>
           <td class="right" style="font-weight:700;">${fmtBgnEur(taxBase)}</td>
         </tr>
         <tr>
@@ -819,6 +819,17 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
                 `;
             })
             .join('');
+
+        const protocolHoursAndPricingSummaryHtml = `
+          <div class="meta" style="margin-top: 10px; border-top: 2px solid #111; padding-top: 8px; display:flex; flex-direction: column; gap: 4px;">
+            <div><span><strong>Труд:</strong></span> <strong>${totalHours.toFixed(2).replace(/\\.00$/, '')} ч.</strong> × <strong>${fmtBgnEur(effectiveHourlyRate)}</strong> = <strong>${fmtBgnEur(laborTaxBase)}</strong></div>
+            <div><span><strong>Свободни операции:</strong></span> <strong>${freeOpsHoursEqTotal.toFixed(2).replace(/\\.00$/, '')} ч.</strong> × <strong>${fmtBgnEur(effectiveHourlyRate)}</strong> = <strong>${fmtBgnEur(freeOpsNet)}</strong></div>
+            <div><span><strong>Общо часове:</strong></span> <strong>${protocolTotalHours.toFixed(2).replace(/\\.00$/, '')} ч.</strong></div>
+            <div><span><strong>Сума без ДДС:</strong></span> <strong>${fmtBgnEur(taxBase)}</strong></div>
+            <div><span><strong>ДДС (${vatRate.toFixed(2)}%):</strong></span> <strong>${fmtBgnEur(vatAmount)}</strong></div>
+            <div><span><strong>За плащане:</strong></span> <strong>${fmtBgnEur(totalAmount)}</strong></div>
+          </div>
+        `;
 
         const protocolHtml = `<!doctype html>
 <html>
@@ -902,11 +913,7 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
       </tbody>
     </table>
 
-    <div class="meta" style="margin-top: 10px; border-top: 2px solid #111; padding-top: 8px; display:flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
-      <div><span>Данъчна основа:</span> <strong>${fmtBgnEur(taxBase)}</strong></div>
-      <div><span>ДДС (${vatRate.toFixed(2)}%):</span> <strong>${fmtBgnEur(vatAmount)}</strong></div>
-      <div><span>За плащане:</span> <strong>${fmtBgnEur(totalAmount)}</strong></div>
-    </div>
+    ${protocolHoursAndPricingSummaryHtml}
 
     <div class="meta" style="margin-top: 18px; display:flex; justify-content: flex-end;">
       <div><strong>Съставил:</strong> ${escapeHtml(preparedByName || '—')}</div>
