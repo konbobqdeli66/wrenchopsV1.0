@@ -645,8 +645,11 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
         const freeOpsHoursEqTotal = freeOpsNet / safeEffectiveHourlyRate;
         const protocolTotalHours = totalHours + freeOpsHoursEqTotal;
 
-        const laborTaxBase = totalHours * hourlyRate * multiplier;
-        const taxBase = laborTaxBase + freeOpsNet;
+        // "Свободни Операции" are treated as LABOR by converting them to equivalent hours.
+        // This keeps the same math as before, but presents totals as labor only:
+        // laborTaxBase = (laborHours + freeOpsNet/effectiveHourlyRate) * effectiveHourlyRate
+        const laborTaxBase = protocolTotalHours * effectiveHourlyRate;
+        const taxBase = laborTaxBase;
         const vatAmount = taxBase * (vatRate / 100);
         const totalAmount = taxBase + vatAmount;
 
@@ -822,9 +825,7 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
 
         const protocolHoursAndPricingSummaryHtml = `
           <div class="meta" style="margin-top: 10px; border-top: 2px solid #111; padding-top: 8px; display:flex; flex-direction: column; gap: 4px;">
-            <div><span><strong>Труд:</strong></span> <strong>${totalHours.toFixed(2).replace(/\\.00$/, '')} ч.</strong> × <strong>${fmtBgnEur(effectiveHourlyRate)}</strong> = <strong>${fmtBgnEur(laborTaxBase)}</strong></div>
-            <div><span><strong>Свободни операции:</strong></span> <strong>${freeOpsHoursEqTotal.toFixed(2).replace(/\\.00$/, '')} ч.</strong> × <strong>${fmtBgnEur(effectiveHourlyRate)}</strong> = <strong>${fmtBgnEur(freeOpsNet)}</strong></div>
-            <div><span><strong>Общо часове:</strong></span> <strong>${protocolTotalHours.toFixed(2).replace(/\\.00$/, '')} ч.</strong></div>
+            <div><span><strong>Труд:</strong></span> <strong>${protocolTotalHours.toFixed(2).replace(/\\.00$/, '')} ч.</strong> × <strong>${fmtBgnEur(effectiveHourlyRate)}</strong> = <strong>${fmtBgnEur(laborTaxBase)}</strong></div>
             <div><span><strong>Сума без ДДС:</strong></span> <strong>${fmtBgnEur(taxBase)}</strong></div>
             <div><span><strong>ДДС (${vatRate.toFixed(2)}%):</strong></span> <strong>${fmtBgnEur(vatAmount)}</strong></div>
             <div><span><strong>За плащане:</strong></span> <strong>${fmtBgnEur(totalAmount)}</strong></div>

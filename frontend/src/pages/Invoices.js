@@ -928,8 +928,11 @@ export default function Invoices({ canDeleteInvoices = false }) {
     const freeOpsHoursEqTotal = freeOpsNet / safeEffectiveHourlyRate;
     const protocolTotalHours = totalHours + freeOpsHoursEqTotal;
 
-    const laborTaxBase = totalHours * effectiveHourlyRate;
-    const taxBase = laborTaxBase + freeOpsNet;
+    // IMPORTANT: "Свободни Операции" are treated as LABOR (converted to equivalent hours).
+    // We still keep `freeOpsNet` as the source-of-truth input for the equivalent hours, but the invoice/protocol
+    // totals are presented as labor only.
+    const laborTaxBase = protocolTotalHours * effectiveHourlyRate;
+    const taxBase = laborTaxBase;
     const vatAmount = taxBase * (vatRate / 100);
     const totalAmount = taxBase + vatAmount;
 
@@ -1090,12 +1093,9 @@ export default function Invoices({ canDeleteInvoices = false }) {
               <div class="line"><span></span><span><strong>${escapeHtml(company.iban)}</strong></span></div>
             </div>
              <div style="flex:1;" class="summary">
-               <div class="line"><span><strong>Труд (часове):</strong></span><span><strong>${totalHours.toFixed(2).replace(/\.00$/, '')} ч.</strong></span></div>
-               <div class="line"><span><strong>Свободни операции (екв. часове):</strong></span><span><strong>${freeOpsHoursEqTotal.toFixed(2).replace(/\.00$/, '')} ч.</strong></span></div>
+               <div class="line"><span><strong>Труд (часове):</strong></span><span><strong>${protocolTotalHours.toFixed(2).replace(/\.00$/, '')} ч.</strong></span></div>
                <div class="line"><span><strong>Цена на час:</strong></span><span><strong>${fmtBgnEur(effectiveHourlyRate)}</strong></span></div>
                <div class="line"><span><strong>Труд (без ДДС):</strong></span><span><strong>${fmtBgnEur(laborTaxBase)}</strong></span></div>
-               <div class="line"><span><strong>Свободни операции (без ДДС):</strong></span><span><strong>${fmtBgnEur(freeOpsNet)}</strong></span></div>
-               <div class="line"><span><strong>Сума без ДДС:</strong></span><span><strong>${fmtBgnEur(taxBase)}</strong></span></div>
                <div class="line"><span><strong>ДДС:</strong></span><span><strong>${fmtBgnEur(vatAmount)}</strong></span></div>
                <div class="line"><span><strong>За плащане:</strong></span><span><strong>${fmtBgnEur(totalAmount)}</strong></span></div>
              </div>
