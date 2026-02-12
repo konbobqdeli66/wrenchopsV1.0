@@ -544,7 +544,13 @@ export default function Worktimes({ t }) {
                     size="small"
                     variant="outlined"
                     onClick={() => {
-                      if (navStep === 'worktimes' && vehicleTypeFilter !== 'trailer') {
+                      // If the current category has a subcategory step (trucks only), go one step back.
+                      // Otherwise (e.g. group 10 "Свободни Операции"), go back directly to category selection.
+                      if (
+                        navStep === 'worktimes' &&
+                        vehicleTypeFilter !== 'trailer' &&
+                        activeCategoryHasSubcategories
+                      ) {
                         setNavStep('subcategory');
                         return;
                       }

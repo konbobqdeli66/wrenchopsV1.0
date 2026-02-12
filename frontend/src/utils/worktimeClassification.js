@@ -17,6 +17,8 @@ export const TRUCK_CATEGORIES = [
   { key: 'attachments', no: 9, label: 'Прикачни елементи' },
   // Free operations (manual price at invoicing; no standard hours)
   { key: 'free_ops', no: 10, label: 'Свободни Операции' },
+  // External services (standard worktimes managed the same way as other categories)
+  { key: 'external_services', no: 11, label: 'Външни услуги' },
 ];
 
 // Truck subcategories (as in the provided classification screenshots).
