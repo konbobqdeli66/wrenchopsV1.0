@@ -981,44 +981,23 @@ export default function Invoices({ canDeleteInvoices = false }) {
     const serviceDescription = `Ремонт на ${assetLabel} с регистрационен номер ${selectedOrder.reg_number} съгласно работна карта: ${protocolNo}`;
 
     // Invoice rows:
-    // 1) Labor row (hours-based)
-    // 2) Each "Свободни Операции" row (manual unit price)
+    // Single row only. We include manual-priced "Свободни Операции" inside the same row
+    // by using `taxBase` (labor + free ops) as the net amount.
     const laborRowHtml = `
       <tr>
         <td style="text-align:center">1</td>
         <td>${escapeHtml(serviceDescription)}</td>
         <td>${escapeHtml(selectedOrder.reg_number || '')}</td>
         <td style="text-align:right">1</td>
-        <td style="text-align:right">${laborTaxBase.toFixed(2)}</td>
+        <td style="text-align:right">${taxBase.toFixed(2)}</td>
         <td style="text-align:right">${vatRate.toFixed(2)}%</td>
-        <td style="text-align:right">${laborTaxBase.toFixed(2)}</td>
+        <td style="text-align:right">${taxBase.toFixed(2)}</td>
       </tr>
     `;
 
-    // Invoice rows for "Свободни Операции": show ONLY the price.
-    // Quantity stays 1 (the repair service/protocol is one), and unit price equals the line net amount.
-    const freeOpsRowsHtml = freeOpsWorktimes
-      .filter((ow) => (Number(ow.quantity) || 0) > 0)
-      .map((ow, i) => {
-        const idx = i + 2;
-        const qty = Number(ow.quantity) || 0;
-        const unit = Number(ow.unit_price_bgn) || 0;
-        const lineNet = unit * qty;
-        return `
-          <tr>
-            <td style="text-align:center">${idx}</td>
-            <td>${escapeHtml(`Свободни Операции: ${ow.worktime_title}`)}</td>
-            <td>${escapeHtml(selectedOrder.reg_number || '')}</td>
-            <td style="text-align:right">1</td>
-            <td style="text-align:right">${lineNet.toFixed(2)}</td>
-            <td style="text-align:right">${vatRate.toFixed(2)}%</td>
-            <td style="text-align:right">${lineNet.toFixed(2)}</td>
-          </tr>
-        `;
-      })
-      .join('');
-
-    const invoiceRowsHtml = `${laborRowHtml}${freeOpsRowsHtml}`;
+    // IMPORTANT: Do not print a separate invoice row for "Свободни Операции".
+    // Their value is included in `taxBase` and the totals, while details remain in the Protocol.
+    const invoiceRowsHtml = `${laborRowHtml}`;
 
     // Print 2 copies of each document with a faint watermark.
     const WATERMARK_ORIGINAL = 'ОРИГИНАЛ';

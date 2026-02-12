@@ -671,42 +671,22 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
             ? `<img src="${escapeHtml(company.logo_data_url)}" style="max-width:110px; max-height:110px; object-fit:contain;" />`
             : '';
 
+        // Invoice rows: single row only.
+        // Manual-priced "Свободни Операции" are INCLUDED in the same row via `taxBase` (net amount).
+        // Their detailed breakdown remains in the Protocol.
         const laborRowHtml = `
           <tr>
             <td style="text-align:center">1</td>
             <td>Ремонт на превозно средство с регистрационен номер ${escapeHtml(order?.reg_number || '')} съгласно работна карта: ${escapeHtml(docs?.protocol_no || '')}</td>
             <td>${escapeHtml(order?.reg_number || '')}</td>
             <td style="text-align:right">1</td>
-            <td style="text-align:right">${laborTaxBase.toFixed(2)}</td>
+            <td style="text-align:right">${taxBase.toFixed(2)}</td>
             <td style="text-align:right">${vatRate.toFixed(2)}%</td>
-            <td style="text-align:right">${laborTaxBase.toFixed(2)}</td>
+            <td style="text-align:right">${taxBase.toFixed(2)}</td>
           </tr>
         `;
 
-        // Invoice rows for "Свободни Операции": show ONLY the price.
-        // Quantity stays 1, and unit price equals the line net amount.
-        const freeOpsRowsHtml = (freeOpsRows || [])
-            .filter((r) => (Number(r?.quantity) || 0) > 0)
-            .map((r, i) => {
-                const rowNo = i + 2;
-                const qty = Number(r?.quantity) || 0;
-                const unit = Number(r?.unit_price_bgn) || 0;
-                const lineNet = qty * unit;
-                return `
-                  <tr>
-                    <td style="text-align:center">${rowNo}</td>
-                    <td>${escapeHtml(`Свободни Операции: ${r?.worktime_title || ''}`)}</td>
-                    <td>${escapeHtml(order?.reg_number || '')}</td>
-                    <td style="text-align:right">1</td>
-                    <td style="text-align:right">${lineNet.toFixed(2)}</td>
-                    <td style="text-align:right">${vatRate.toFixed(2)}%</td>
-                    <td style="text-align:right">${lineNet.toFixed(2)}</td>
-                  </tr>
-                `;
-            })
-            .join('');
-
-        const invoiceRowsHtml = `${laborRowHtml}${freeOpsRowsHtml}`;
+        const invoiceRowsHtml = `${laborRowHtml}`;
 
         const invoiceHtml = `<!doctype html>
 <html>
