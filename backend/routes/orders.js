@@ -3,6 +3,11 @@ const router = express.Router();
 const db = require('../db');
 const puppeteer = require('puppeteer');
 const { checkPermission } = require('../middleware/permissions');
+const {
+    loadWorktimesGroupPermissionsMap,
+    canAccessWorktimesGroup,
+    mapComponentTypeToCategoryKey,
+} = require('../utils/worktimeGroupAccess');
 
 // Reuse a single Chromium instance to avoid slow startup on every email.
 let sharedPdfBrowser = null;
@@ -992,31 +997,60 @@ router.post('/:orderId/worktimes', checkPermission('orders', 'write'), (req, res
     const qtyToAdd = Math.max(1, parseInt(quantity, 10) || 1);
     const cleanNotes = String(notes || '').trim();
 
-    // If the user adds the same worktime again WITHOUT notes, increment quantity
-    // instead of creating a duplicate row. If notes are provided, keep a separate row.
-    if (!cleanNotes) {
-        db.get(
-            `
-                SELECT id, quantity
-                FROM order_worktimes
-                WHERE order_id = ? AND worktime_id = ? AND TRIM(COALESCE(notes, '')) = ''
-                ORDER BY created_at DESC
-                LIMIT 1
-            `,
-            [orderId, worktime_id],
-            (findErr, existing) => {
-                if (findErr) {
-                    return res.status(500).json({ error: findErr.message });
-                }
+    const continueAdd = () => {
+        // If the user adds the same worktime again WITHOUT notes, increment quantity
+        // instead of creating a duplicate row. If notes are provided, keep a separate row.
+        if (!cleanNotes) {
+            db.get(
+                `
+                    SELECT id, quantity
+                    FROM order_worktimes
+                    WHERE order_id = ? AND worktime_id = ? AND TRIM(COALESCE(notes, '')) = ''
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                `,
+                [orderId, worktime_id],
+                (findErr, existing) => {
+                    if (findErr) {
+                        return res.status(500).json({ error: findErr.message });
+                    }
 
-                if (existing?.id) {
-                    const newQty = (parseInt(existing.quantity, 10) || 0) + qtyToAdd;
+                    if (existing?.id) {
+                        const newQty = (parseInt(existing.quantity, 10) || 0) + qtyToAdd;
+                        db.run(
+                            'UPDATE order_worktimes SET quantity = ? WHERE id = ? AND order_id = ?',
+                            [newQty, existing.id, orderId],
+                            function (updErr) {
+                                if (updErr) {
+                                    return res.status(500).json({ error: updErr.message });
+                                }
+                                db.get(
+                                    `
+                                         SELECT ow.*, w.title as worktime_title, w.hours, w.component_type
+                                         FROM order_worktimes ow
+                                         JOIN worktimes w ON ow.worktime_id = w.id
+                                         WHERE ow.id = ?
+                                     `,
+                                    [existing.id],
+                                    (getErr, row) => {
+                                        if (getErr) {
+                                            return res.status(500).json({ error: getErr.message });
+                                        }
+                                        return res.json(row);
+                                    }
+                                );
+                            }
+                        );
+                        return;
+                    }
+
+                    // No existing "no-notes" row, insert a new one.
                     db.run(
-                        'UPDATE order_worktimes SET quantity = ? WHERE id = ? AND order_id = ?',
-                        [newQty, existing.id, orderId],
-                        function (updErr) {
-                            if (updErr) {
-                                return res.status(500).json({ error: updErr.message });
+                        'INSERT INTO order_worktimes (order_id, worktime_id, quantity, notes) VALUES (?, ?, ?, ?)',
+                        [orderId, worktime_id, qtyToAdd, ''],
+                        function (insErr) {
+                            if (insErr) {
+                                return res.status(500).json({ error: insErr.message });
                             }
                             db.get(
                                 `
@@ -1025,7 +1059,7 @@ router.post('/:orderId/worktimes', checkPermission('orders', 'write'), (req, res
                                      JOIN worktimes w ON ow.worktime_id = w.id
                                      WHERE ow.id = ?
                                  `,
-                                [existing.id],
+                                [this.lastID],
                                 (getErr, row) => {
                                     if (getErr) {
                                         return res.status(500).json({ error: getErr.message });
@@ -1035,62 +1069,63 @@ router.post('/:orderId/worktimes', checkPermission('orders', 'write'), (req, res
                             );
                         }
                     );
+                }
+            );
+            return;
+        }
+
+        // Notes provided -> always insert as a separate row.
+        db.run(
+            'INSERT INTO order_worktimes (order_id, worktime_id, quantity, notes) VALUES (?, ?, ?, ?)',
+            [orderId, worktime_id, qtyToAdd, cleanNotes],
+            function(err) {
+                if (err) {
+                    res.status(500).json({ error: err.message });
                     return;
                 }
-
-                // No existing "no-notes" row, insert a new one.
-                db.run(
-                    'INSERT INTO order_worktimes (order_id, worktime_id, quantity, notes) VALUES (?, ?, ?, ?)',
-                    [orderId, worktime_id, qtyToAdd, ''],
-                    function (insErr) {
-                        if (insErr) {
-                            return res.status(500).json({ error: insErr.message });
-                        }
-                        db.get(
-                            `
-                                 SELECT ow.*, w.title as worktime_title, w.hours, w.component_type
-                                 FROM order_worktimes ow
-                                 JOIN worktimes w ON ow.worktime_id = w.id
-                                 WHERE ow.id = ?
-                             `,
-                            [this.lastID],
-                            (getErr, row) => {
-                                if (getErr) {
-                                    return res.status(500).json({ error: getErr.message });
-                                }
-                                return res.json(row);
-                            }
-                        );
+                db.get(`
+                    SELECT ow.*, w.title as worktime_title, w.hours, w.component_type
+                    FROM order_worktimes ow
+                    JOIN worktimes w ON ow.worktime_id = w.id
+                    WHERE ow.id = ?
+                `, [this.lastID], (getErr, row) => {
+                    if (getErr) {
+                        res.status(500).json({ error: getErr.message });
+                        return;
                     }
-                );
+                    res.json(row);
+                });
             }
         );
-        return;
-    }
+    };
 
-    // Notes provided -> always insert as a separate row.
-    db.run(
-        'INSERT INTO order_worktimes (order_id, worktime_id, quantity, notes) VALUES (?, ?, ?, ?)',
-        [orderId, worktime_id, qtyToAdd, cleanNotes],
-        function(err) {
-            if (err) {
-                res.status(500).json({ error: err.message });
-                return;
-            }
-            db.get(`
-                SELECT ow.*, w.title as worktime_title, w.hours, w.component_type
-                FROM order_worktimes ow
-                JOIN worktimes w ON ow.worktime_id = w.id
-                WHERE ow.id = ?
-            `, [this.lastID], (getErr, row) => {
-                if (getErr) {
-                    res.status(500).json({ error: getErr.message });
-                    return;
-                }
-                res.json(row);
-            });
+    // Enforce per-group access for adding worktimes.
+    // UI hides forbidden groups, but backend must enforce too.
+    db.get('SELECT component_type, vehicle_type FROM worktimes WHERE id = ?', [worktime_id], async (wtErr, wtRow) => {
+        if (wtErr) {
+            return res.status(500).json({ error: wtErr.message });
         }
-    );
+        if (!wtRow) {
+            return res.status(400).json({ error: 'Невалидно worktime_id' });
+        }
+
+        if (String(req.user?.role || '').trim() !== 'admin') {
+            const groupPermsMap = await loadWorktimesGroupPermissionsMap(db, req.user?.id);
+            const vt = String(wtRow?.vehicle_type || '').trim().toLowerCase() === 'trailer' ? 'trailer' : 'truck';
+            const catKey = mapComponentTypeToCategoryKey(vt, wtRow?.component_type);
+            const ok = canAccessWorktimesGroup({
+                user: req.user,
+                groupPermsMap,
+                vehicleType: vt,
+                categoryKey: catKey,
+            });
+            if (!ok) {
+                return res.status(403).json({ error: 'Нямате достъп до тази група нормовремена.' });
+            }
+        }
+
+        return continueAdd();
+    });
 });
 
 // Вземане на нормовремената за поръчка

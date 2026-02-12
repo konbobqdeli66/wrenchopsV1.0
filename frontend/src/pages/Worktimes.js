@@ -40,8 +40,9 @@ import {
   getWorktimeCategoryKey,
   getWorktimeSubcategoryKey,
 } from "../utils/worktimeClassification";
+import { filterCategoriesByGroupAccess } from "../utils/worktimeGroupAccess";
 
-export default function Worktimes({ t }) {
+export default function Worktimes({ t, userPermissions, userRole }) {
   const [worktimes, setWorktimes] = useState([]);
   const [itemsPerPage, setItemsPerPage] = useState(25);
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState('truck');
@@ -63,7 +64,15 @@ export default function Worktimes({ t }) {
 
   const isFreeOpsCategoryKey = (key) => String(key || '').trim() === 'free_ops';
 
-  const categories = getCategoriesForVehicleType(vehicleTypeFilter);
+  const categories = useMemo(() => {
+    const all = getCategoriesForVehicleType(vehicleTypeFilter);
+    return filterCategoriesByGroupAccess({
+      categories: all,
+      userRole,
+      userPermissions,
+      vehicleType: vehicleTypeFilter,
+    });
+  }, [vehicleTypeFilter, userRole, userPermissions]);
   const subcategories = useMemo(
     () => getSubcategoriesForCategoryKey(vehicleTypeFilter, activeCategoryKey),
     [vehicleTypeFilter, activeCategoryKey]
@@ -162,12 +171,23 @@ export default function Worktimes({ t }) {
 
   useEffect(() => {
     // When vehicle type changes we restart the navigation from the first step.
-    const firstCatKey = getCategoriesForVehicleType(vehicleTypeFilter)[0]?.key || 'regular';
+    const firstCatKey = categories[0]?.key || 'regular';
     setActiveCategoryKey(firstCatKey);
     setActiveSubcategoryKey('');
     setNavStep('category');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vehicleTypeFilter]);
+  }, [vehicleTypeFilter, categories]);
+
+  useEffect(() => {
+    // If current category becomes forbidden (permissions changed), snap to first allowed.
+    const allowedKeys = new Set((categories || []).map((c) => c.key));
+    if (!allowedKeys.size) return;
+    if (!allowedKeys.has(activeCategoryKey)) {
+      setActiveCategoryKey(categories[0]?.key || 'regular');
+      setActiveSubcategoryKey('');
+      setNavStep('category');
+    }
+  }, [categories, activeCategoryKey]);
 
   useEffect(() => {
     // If the active category has no subcategories, ensure we never land in the subcategory step.

@@ -50,8 +50,9 @@ import {
   getWorktimeCategoryKey,
   getWorktimeSubcategoryKey,
 } from "../utils/worktimeClassification";
+import { filterCategoriesByGroupAccess } from "../utils/worktimeGroupAccess";
 
-export default function Orders({ t }) {
+export default function Orders({ t, userPermissions, userRole }) {
   const [orders, setOrders] = useState([]);
   const [search, setSearch] = useState("");
   const [form, setForm] = useState({
@@ -140,7 +141,15 @@ export default function Orders({ t }) {
   // (No fixed maxWidth – use the available content width.)
   const pageColumnSx = { width: '100%' };
 
-  const selectionCategories = getCategoriesForVehicleType(orderVehicleType);
+  const selectionCategories = useMemo(() => {
+    const all = getCategoriesForVehicleType(orderVehicleType);
+    return filterCategoriesByGroupAccess({
+      categories: all,
+      userRole,
+      userPermissions,
+      vehicleType: orderVehicleType,
+    });
+  }, [orderVehicleType, userRole, userPermissions]);
 
   const selectionCategoryHasSubcategories = useMemo(() => {
     if (orderVehicleType === 'trailer') return false;
@@ -352,7 +361,14 @@ export default function Orders({ t }) {
     setSelectedOrder(order);
     const vt = (await loadVehicleTypeForReg(order?.reg_number)) || 'truck';
     setOrderVehicleType(vt);
-    const firstKey = getCategoriesForVehicleType(vt)[0]?.key || 'regular';
+
+    const allowed = filterCategoriesByGroupAccess({
+      categories: getCategoriesForVehicleType(vt),
+      userRole,
+      userPermissions,
+      vehicleType: vt,
+    });
+    const firstKey = allowed[0]?.key || 'regular';
     setWorktimeCategoryKey(firstKey);
 
     // Default to the first subgroup when the vehicle is a truck.

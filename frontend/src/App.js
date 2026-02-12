@@ -1115,8 +1115,8 @@ function MainApp() {
         <Container maxWidth="xl" sx={{ py: 2 }}>
           {page === 0 && <Home setPage={setPage} t={t} />}
           {page === 1 && <Clients setPage={setPage} t={t} />}
-          {page === 2 && <Orders t={t} />}
-          {page === 3 && <Worktimes t={t} />}
+          {page === 2 && <Orders t={t} userPermissions={userPermissions} userRole={userRole} />}
+          {page === 3 && <Worktimes t={t} userPermissions={userPermissions} userRole={userRole} />}
           {page === 4 && <Vehicles setPage={setPage} t={t} />}
           {page === 5 && <Invoices t={t} canDeleteInvoices={canDeleteInvoices} />}
           {page === 6 && userRole === 'admin' && <Admin t={t} />}

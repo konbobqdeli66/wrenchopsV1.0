@@ -2,6 +2,12 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { checkPermission, verifyToken } = require('../middleware/permissions');
+const {
+  loadWorktimesGroupPermissionsMap,
+  filterRowsByGroupAccess,
+  mapComponentTypeToCategoryKey,
+  canAccessWorktimesGroup,
+} = require('../utils/worktimeGroupAccess');
 
 const XLSX = require('xlsx');
 const multer = require('multer');
@@ -98,12 +104,27 @@ router.get('/', checkPermission('worktimes', 'read'), (req, res) => {
     const sql = isValidVt ? 'SELECT * FROM worktimes WHERE vehicle_type = ?' : 'SELECT * FROM worktimes';
     const params = isValidVt ? [vt] : [];
 
-    db.all(sql, params, (err, rows) => {
+    db.all(sql, params, async (err, rows) => {
         if (err) {
             res.status(500).json({ error: err.message });
             return;
         }
-        res.json(rows);
+
+        // Per-group visibility filter (non-admin only)
+        if (String(req.user?.role || '').trim() === 'admin') {
+          res.json(rows);
+          return;
+        }
+
+        const groupPermsMap = await loadWorktimesGroupPermissionsMap(db, req.user?.id);
+        const filtered = filterRowsByGroupAccess({
+          user: req.user,
+          groupPermsMap,
+          rows,
+          getVehicleType: (r) => r?.vehicle_type,
+          getComponentType: (r) => r?.component_type,
+        });
+        res.json(filtered);
     });
 });
 
@@ -120,6 +141,8 @@ router.get('/free_ops', authenticateToken, (req, res) => {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
+
+    // Per requirements: "Свободни Операции" are always visible/editable by all authenticated users.
     return res.json(rows || []);
   });
 });
@@ -230,9 +253,20 @@ router.get('/xlsx/export', checkPermission('worktimes', 'read'), async (req, res
   try {
     const vt = String(req.query.vehicle_type || '').trim().toLowerCase();
     const isValidVt = vt === 'truck' || vt === 'trailer';
-    const rows = isValidVt
+    let rows = isValidVt
       ? await allAsync('SELECT * FROM worktimes WHERE vehicle_type = ? ORDER BY id ASC', [vt])
       : await allAsync('SELECT * FROM worktimes ORDER BY id ASC');
+
+    if (String(req.user?.role || '').trim() !== 'admin') {
+      const groupPermsMap = await loadWorktimesGroupPermissionsMap(db, req.user?.id);
+      rows = filterRowsByGroupAccess({
+        user: req.user,
+        groupPermsMap,
+        rows,
+        getVehicleType: (r) => r?.vehicle_type,
+        getComponentType: (r) => r?.component_type,
+      });
+    }
 
     const wb = makeWorktimesWorkbook(rows, { includeVehicleType: true });
     const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
@@ -362,6 +396,40 @@ router.post('/', checkPermission('worktimes', 'write'), (req, res) => {
     const isFreeOps = componentTypeRaw === FREE_OPS_COMPONENT_TYPE;
     const parsedHours = isFreeOps ? 0 : Number(String(hours ?? '').replace(',', '.'));
 
+    // Enforce per-group access (non-admin).
+    if (String(req.user?.role || '').trim() !== 'admin') {
+      const categoryKey = mapComponentTypeToCategoryKey(safeVehicleType, componentTypeRaw);
+      loadWorktimesGroupPermissionsMap(db, req.user?.id).then((groupPermsMap) => {
+        const ok = canAccessWorktimesGroup({
+          user: req.user,
+          groupPermsMap,
+          vehicleType: safeVehicleType,
+          categoryKey,
+        });
+        if (!ok) {
+          return res.status(403).json({ error: 'Нямате достъп до избраната група нормовремена.' });
+        }
+        db.run(
+          'INSERT INTO worktimes (title, hours, component_type, vehicle_type) VALUES (?, ?, ?, ?)',
+          [cleanTitle, parsedHours, componentTypeRaw, safeVehicleType],
+          function (err) {
+            if (err) {
+              res.status(500).json({ error: err.message });
+              return;
+            }
+            db.get('SELECT * FROM worktimes WHERE id = ?', [this.lastID], (err, row) => {
+              if (err) {
+                res.status(500).json({ error: err.message });
+                return;
+              }
+              res.json(row);
+            });
+          }
+        );
+      });
+      return;
+    }
+
     if (!cleanTitle) {
       return res.status(400).json({ error: 'title is required' });
     }
@@ -392,12 +460,41 @@ router.post('/', checkPermission('worktimes', 'write'), (req, res) => {
 
 // Изтриване
 router.delete('/:id', checkPermission('worktimes', 'delete'), (req, res) => {
-    db.run('DELETE FROM worktimes WHERE id = ?', [req.params.id], function(err) {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid id' });
+    }
+
+    // Enforce group access for delete.
+    db.get('SELECT component_type, vehicle_type FROM worktimes WHERE id = ?', [id], async (getErr, row) => {
+      if (getErr) {
+        return res.status(500).json({ error: getErr.message });
+      }
+      if (!row) {
+        return res.status(404).json({ error: 'Нормовремето не е намерено.' });
+      }
+
+      if (String(req.user?.role || '').trim() !== 'admin') {
+        const groupPermsMap = await loadWorktimesGroupPermissionsMap(db, req.user?.id);
+        const categoryKey = mapComponentTypeToCategoryKey(row.vehicle_type, row.component_type);
+        const ok = canAccessWorktimesGroup({
+          user: req.user,
+          groupPermsMap,
+          vehicleType: row.vehicle_type,
+          categoryKey,
+        });
+        if (!ok) {
+          return res.status(403).json({ error: 'Нямате достъп до групата на това нормовреме.' });
+        }
+      }
+
+      db.run('DELETE FROM worktimes WHERE id = ?', [id], function (delErr) {
+        if (delErr) {
+          res.status(500).json({ error: delErr.message });
+          return;
         }
         res.json({ message: 'Нормовремето е изтрито.' });
+      });
     });
 });
 

@@ -42,6 +42,13 @@ import UploadFileIcon from '@mui/icons-material/UploadFile';
 import DownloadIcon from '@mui/icons-material/Download';
 import DescriptionIcon from '@mui/icons-material/Description';
 import { getApiBaseUrl } from "../api";
+import { TRUCK_CATEGORIES, TRAILER_CATEGORIES } from "../utils/worktimeClassification";
+
+const makeWorktimesGroupModuleKey = (vehicleType, categoryKey) => {
+  const vt = String(vehicleType || '').trim().toLowerCase() === 'trailer' ? 'trailer' : 'truck';
+  const ck = String(categoryKey || '').trim();
+  return `worktimes_group:${vt}:${ck}`;
+};
 
 export default function Admin({ t }) {
   const langCode = (typeof window !== 'undefined' && localStorage.getItem('language')) || 'bg';
@@ -173,6 +180,22 @@ export default function Admin({ t }) {
     { key: 'admin', label: t('admin') },
   ];
 
+  const groupModules = React.useMemo(() => {
+    const truck = (TRUCK_CATEGORIES || [])
+      .filter((c) => c?.key && c.key !== 'free_ops')
+      .map((c) => ({
+        module: makeWorktimesGroupModuleKey('truck', c.key),
+        label: `Автомобил: ${c.no}. ${c.label}`,
+      }));
+    const trailer = (TRAILER_CATEGORIES || [])
+      .filter((c) => c?.key && c.key !== 'free_ops')
+      .map((c) => ({
+        module: makeWorktimesGroupModuleKey('trailer', c.key),
+        label: `Ремарке: ${c.no}. ${c.label}`,
+      }));
+    return [...truck, ...trailer];
+  }, []);
+
   useEffect(() => {
     loadUsers();
     loadInvitations();
@@ -240,30 +263,43 @@ export default function Admin({ t }) {
         headers: { Authorization: `Bearer ${token}` }
       });
 
-      // Ensure all modules have permission entries
-      const existingPermissions = res.data;
-      const allPermissions = modules.map(module => {
-        const existing = existingPermissions.find(p => p.module === module.key);
+      const existingPermissions = Array.isArray(res.data) ? res.data : [];
+
+      // Ensure base app modules exist
+      const base = modules.map((m) => {
+        const existing = existingPermissions.find((p) => p.module === m.key);
         return existing || {
-          module: module.key,
+          module: m.key,
           can_access_module: 0,
           can_read: 0,
           can_write: 0,
-          can_delete: 0
+          can_delete: 0,
         };
       });
 
-      setUserPermissions(allPermissions);
+      // Ensure group modules exist (default: allowed)
+      const groups = groupModules.map((g) => {
+        const existing = existingPermissions.find((p) => p.module === g.module);
+        return existing || {
+          module: g.module,
+          can_access_module: 1,
+          can_read: 1,
+          can_write: 1,
+          can_delete: 1,
+        };
+      });
+
+      // Keep any extra permission rows (forward-compatible)
+      const known = new Set([...modules.map((m) => m.key), ...groupModules.map((g) => g.module)]);
+      const extra = existingPermissions.filter((p) => p?.module && !known.has(p.module));
+
+      setUserPermissions([...base, ...groups, ...extra]);
     } catch (error) {
       console.error('Error loading permissions:', error);
-      // Create default permissions for all modules
-      const defaultPermissions = modules.map(module => ({
-        module: module.key,
-        can_access_module: 0,
-        can_read: 0,
-        can_write: 0,
-        can_delete: 0
-      }));
+      const defaultPermissions = [
+        ...modules.map((m) => ({ module: m.key, can_access_module: 0, can_read: 0, can_write: 0, can_delete: 0 })),
+        ...groupModules.map((g) => ({ module: g.module, can_access_module: 1, can_read: 1, can_write: 1, can_delete: 1 })),
+      ];
       setUserPermissions(defaultPermissions);
     }
   }
@@ -296,8 +332,24 @@ export default function Admin({ t }) {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
+      const payloadPermissions = (userPermissions || []).map((p) => {
+        const module = String(p?.module || '');
+        const isGroup = module.startsWith('worktimes_group:');
+        const access = p?.can_access_module ? 1 : 0;
+        if (!isGroup) return p;
+        // For group permissions we only care about can_access_module.
+        // Keep other flags aligned.
+        return {
+          ...p,
+          can_access_module: access,
+          can_read: access,
+          can_write: access,
+          can_delete: access,
+        };
+      });
+
       await axios.put(`${getApiBaseUrl()}/admin/users/${selectedUser.id}/permissions`, {
-        permissions: userPermissions
+        permissions: payloadPermissions
       }, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -1550,6 +1602,38 @@ export default function Admin({ t }) {
                           />
                         </Box>
                       </Box>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              );
+            })}
+          </Grid>
+
+          <Divider sx={{ my: 3 }} />
+          <Typography variant="subtitle1" sx={{ fontWeight: 900, mb: 1 }}>
+            Достъп до групи „Нормовремена“
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Групите без достъп няма да се виждат в таба „Нормовремена“ и в модала за добавяне към работна карта.
+            „Свободни Операции“ са винаги видими за всички.
+          </Typography>
+
+          <Grid container spacing={2}>
+            {groupModules.map((g) => {
+              const current = userPermissions.find((p) => p.module === g.module) || {
+                module: g.module,
+                can_access_module: 1,
+              };
+              return (
+                <Grid item xs={12} md={6} key={g.module}>
+                  <Card variant="outlined">
+                    <CardContent sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                      <Typography sx={{ fontWeight: 800 }}>{g.label}</Typography>
+                      <Switch
+                        checked={Number(current.can_access_module) === 1}
+                        onChange={(e) => handlePermissionChange(g.module, 'can_access_module', e.target.checked)}
+                        color="primary"
+                      />
                     </CardContent>
                   </Card>
                 </Grid>
