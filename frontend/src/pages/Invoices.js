@@ -681,6 +681,15 @@ export default function Invoices({ canDeleteInvoices = false }) {
     return Number.isNaN(d.getTime()) ? String(dt) : d.toLocaleString('bg-BG');
   };
 
+  // Used in invoice/protocol document print: issue dates must NOT include time.
+  const formatSqliteDateOnly = (dt) => {
+    if (!dt) return '—';
+    // SQLite datetime('now') returns 'YYYY-MM-DD HH:MM:SS'
+    const safe = String(dt).replace(' ', 'T');
+    const d = new Date(safe);
+    return Number.isNaN(d.getTime()) ? String(dt).slice(0, 10) : d.toLocaleDateString('bg-BG');
+  };
+
   const formatBgnEur = (bgnAmount) => {
     const bgn = Number(bgnAmount) || 0;
     const eurRate = Number(company.eur_rate) || 1.95583;
@@ -1055,8 +1064,8 @@ export default function Invoices({ canDeleteInvoices = false }) {
 
           <div style="display:flex; justify-content: space-between; gap: 18mm; margin-top: 10mm;">
             <div style="flex:1;" class="summary">
-              <div class="line"><span class="k">Дата на издаване:</span><span class="v">${escapeHtml(formatSqliteDateTime(completedAt))}</span></div>
-              <div class="line"><span class="k">Дата на дан. събитие:</span><span class="v">${escapeHtml(formatSqliteDateTime(completedAt))}</span></div>
+              <div class="line"><span class="k">Дата на издаване:</span><span class="v">${escapeHtml(formatSqliteDateOnly(completedAt))}</span></div>
+              <div class="line"><span class="k">Дата на дан. събитие:</span><span class="v">${escapeHtml(formatSqliteDateOnly(completedAt))}</span></div>
               <div class="line"><span class="k">Място на сделката:</span><span class="v">${escapeHtml(company.city || '')}</span></div>
               <div class="line"><span class="k">Рег. №:</span><span class="v">${escapeHtml(selectedOrder.reg_number)}</span></div>
             </div>
@@ -1152,8 +1161,8 @@ export default function Invoices({ canDeleteInvoices = false }) {
           </div>
 
           <div style="border-top: 2px solid #111; border-bottom: 2px solid #111; padding: 6px 0; margin-top: 4mm; display:flex; gap: 10mm; font-size: 12.5px;">
-            <div><span class="k">Дата на издаване:</span> <strong>${escapeHtml(formatSqliteDateTime(completedAt))}</strong></div>
-            <div><span class="k">Дата на дан. събитие:</span> <strong>${escapeHtml(formatSqliteDateTime(completedAt))}</strong></div>
+            <div><span class="k">Дата на издаване:</span> <strong>${escapeHtml(formatSqliteDateOnly(completedAt))}</strong></div>
+            <div><span class="k">Дата на дан. събитие:</span> <strong>${escapeHtml(formatSqliteDateOnly(completedAt))}</strong></div>
             <div style="margin-left:auto;"><span class="k">Място на сделката:</span> <strong>${escapeHtml(company.city || '')}</strong></div>
           </div>
 
