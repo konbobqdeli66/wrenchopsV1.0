@@ -985,6 +985,11 @@ export default function Invoices({ canDeleteInvoices = false }) {
       </tr>
     `;
 
+    // For manual-priced "Свободни Операции" we print the quantity as *equivalent hours*
+    // and the unit price as the (effective) hourly rate from Admin settings.
+    // Example: 180 лв at 90 лв/ч => 2.00 hours.
+    const safeEffectiveHourlyRate = Math.max(0.000001, Number(effectiveHourlyRate) || 0.000001);
+
     const freeOpsRowsHtml = freeOpsWorktimes
       .filter((ow) => (Number(ow.quantity) || 0) > 0)
       .map((ow, i) => {
@@ -992,13 +997,14 @@ export default function Invoices({ canDeleteInvoices = false }) {
         const qty = Number(ow.quantity) || 0;
         const unit = Number(ow.unit_price_bgn) || 0;
         const lineNet = unit * qty;
+        const hoursEq = lineNet / safeEffectiveHourlyRate;
         return `
           <tr>
             <td style="text-align:center">${idx}</td>
             <td>${escapeHtml(`Свободни Операции: ${ow.worktime_title}`)}</td>
             <td>${escapeHtml(selectedOrder.reg_number || '')}</td>
-            <td style="text-align:right">${qty}</td>
-            <td style="text-align:right">${unit.toFixed(2)}</td>
+            <td style="text-align:right">${hoursEq.toFixed(2)}</td>
+            <td style="text-align:right">${Number(effectiveHourlyRate).toFixed(2)}</td>
             <td style="text-align:right">${vatRate.toFixed(2)}%</td>
             <td style="text-align:right">${lineNet.toFixed(2)}</td>
           </tr>

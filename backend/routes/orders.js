@@ -636,6 +636,9 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
             (Number(docs?.mult_holiday) || 1) *
             (Number(docs?.mult_out_of_service) || 1);
 
+        // Effective hourly rate used in the invoice (admin hourly_rate * applied multipliers)
+        const effectiveHourlyRate = hourlyRate * multiplier;
+
         const laborTaxBase = totalHours * hourlyRate * multiplier;
         const taxBase = laborTaxBase + freeOpsNet;
         const vatAmount = taxBase * (vatRate / 100);
@@ -674,6 +677,11 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
           </tr>
         `;
 
+        // For manual-priced "Свободни Операции" we print the quantity as *equivalent hours*
+        // and the unit price as the effective hourly rate.
+        // Example: 180 лв at 90 лв/ч => 2.00 hours.
+        const safeEffectiveHourlyRate = Math.max(0.000001, Number(effectiveHourlyRate) || 0.000001);
+
         const freeOpsRowsHtml = (freeOpsRows || [])
             .filter((r) => (Number(r?.quantity) || 0) > 0)
             .map((r, i) => {
@@ -681,13 +689,14 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
                 const qty = Number(r?.quantity) || 0;
                 const unit = Number(r?.unit_price_bgn) || 0;
                 const lineNet = qty * unit;
+                const hoursEq = lineNet / safeEffectiveHourlyRate;
                 return `
                   <tr>
                     <td style="text-align:center">${rowNo}</td>
                     <td>${escapeHtml(`Свободни Операции: ${r?.worktime_title || ''}`)}</td>
                     <td>${escapeHtml(order?.reg_number || '')}</td>
-                    <td style="text-align:right">${qty}</td>
-                    <td style="text-align:right">${unit.toFixed(2)}</td>
+                    <td style="text-align:right">${hoursEq.toFixed(2)}</td>
+                    <td style="text-align:right">${Number(effectiveHourlyRate).toFixed(2)}</td>
                     <td style="text-align:right">${vatRate.toFixed(2)}%</td>
                     <td style="text-align:right">${lineNet.toFixed(2)}</td>
                   </tr>
