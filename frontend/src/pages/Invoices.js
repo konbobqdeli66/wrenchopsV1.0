@@ -922,6 +922,12 @@ export default function Invoices({ canDeleteInvoices = false }) {
     // Apply multipliers directly to the hourly rate, but do NOT mention them anywhere in the documents.
     const effectiveHourlyRate = hourlyRate * multiplier;
 
+    // For protocol-only display: include equivalent hours derived from manual prices.
+    // Equivalent free-ops hours = freeOpsNet / effectiveHourlyRate.
+    const safeEffectiveHourlyRate = Math.max(0.000001, Number(effectiveHourlyRate) || 0.000001);
+    const freeOpsHoursEqTotal = freeOpsNet / safeEffectiveHourlyRate;
+    const protocolTotalHours = totalHours + freeOpsHoursEqTotal;
+
     const laborTaxBase = totalHours * effectiveHourlyRate;
     const taxBase = laborTaxBase + freeOpsNet;
     const vatAmount = taxBase * (vatRate / 100);
@@ -946,23 +952,27 @@ export default function Invoices({ canDeleteInvoices = false }) {
       ? `<img src="${escapeHtml(logoDataUrl)}" style="max-width:110px; max-height:110px; object-fit:contain;" />`
       : '';
 
+    // Protocol rows (for print): for "Свободни Операции" show equivalent hours derived from entered price.
+    // Equivalent total hours = (unit_price_bgn * quantity) / effectiveHourlyRate.
     const protocolRowHtmlItems = orderWorktimes.map((ow, idx) => {
-        const hours = Number(ow.hours) || 0;
-        const qty = Number(ow.quantity) || 0;
-        const total = hours * qty;
-        const notes = ow.notes ? escapeHtml(ow.notes) : '';
-        const isFreeOps = String(ow?.component_type || '').trim() === 'free_ops';
-        return `
+      const isFreeOps = String(ow?.component_type || '').trim() === 'free_ops';
+      const qty = Number(ow.quantity) || 0;
+      const baseHours = Number(ow.hours) || 0;
+      const unitPrice = Number(ow.unit_price_bgn) || 0;
+      const hoursPerUnit = isFreeOps ? (unitPrice / safeEffectiveHourlyRate) : baseHours;
+      const total = hoursPerUnit * qty;
+      const notes = ow.notes ? escapeHtml(ow.notes) : '';
+      return `
           <tr>
             <td style="text-align:center">${idx + 1}</td>
             <td>${escapeHtml(ow.worktime_title)}</td>
             <td class="notes">${notes}</td>
-            <td style="text-align:right">${isFreeOps ? '—' : hours.toFixed(2).replace(/\.00$/, '')}</td>
+            <td style="text-align:right">${hoursPerUnit.toFixed(2).replace(/\.00$/, '')}</td>
             <td style="text-align:right">${qty}</td>
-            <td style="text-align:right">${isFreeOps ? '—' : total.toFixed(2).replace(/\.00$/, '')}</td>
+            <td style="text-align:right">${total.toFixed(2).replace(/\.00$/, '')}</td>
           </tr>
         `;
-      });
+    });
 
     const effectiveType = vehicleTypeOverride || selectedVehicleType;
     const assetLabel =
@@ -985,11 +995,8 @@ export default function Invoices({ canDeleteInvoices = false }) {
       </tr>
     `;
 
-    // For manual-priced "Свободни Операции" we print the quantity as *equivalent hours*
-    // and the unit price as the (effective) hourly rate from Admin settings.
-    // Example: 180 лв at 90 лв/ч => 2.00 hours.
-    const safeEffectiveHourlyRate = Math.max(0.000001, Number(effectiveHourlyRate) || 0.000001);
-
+    // Invoice rows for "Свободни Операции": show ONLY the price.
+    // Quantity stays 1 (the repair service/protocol is one), and unit price equals the line net amount.
     const freeOpsRowsHtml = freeOpsWorktimes
       .filter((ow) => (Number(ow.quantity) || 0) > 0)
       .map((ow, i) => {
@@ -997,14 +1004,13 @@ export default function Invoices({ canDeleteInvoices = false }) {
         const qty = Number(ow.quantity) || 0;
         const unit = Number(ow.unit_price_bgn) || 0;
         const lineNet = unit * qty;
-        const hoursEq = lineNet / safeEffectiveHourlyRate;
         return `
           <tr>
             <td style="text-align:center">${idx}</td>
             <td>${escapeHtml(`Свободни Операции: ${ow.worktime_title}`)}</td>
             <td>${escapeHtml(selectedOrder.reg_number || '')}</td>
-            <td style="text-align:right">${hoursEq.toFixed(2)}</td>
-            <td style="text-align:right">${Number(effectiveHourlyRate).toFixed(2)}</td>
+            <td style="text-align:right">1</td>
+            <td style="text-align:right">${lineNet.toFixed(2)}</td>
             <td style="text-align:right">${vatRate.toFixed(2)}%</td>
             <td style="text-align:right">${lineNet.toFixed(2)}</td>
           </tr>
@@ -1105,12 +1111,12 @@ export default function Invoices({ canDeleteInvoices = false }) {
               <div class="line"><span></span><span><strong>${escapeHtml(company.iban)}</strong></span></div>
             </div>
             <div style="flex:1;" class="summary">
-              <div class="line"><span><strong>Общо часове:</strong></span><span><strong>${totalHours.toFixed(2).replace(/\.00$/, '')} ч.</strong></span></div>
-              <div class="line"><span><strong>Цена на час:</strong></span><span><strong>${fmtBgnEur(effectiveHourlyRate)}</strong></span></div>
-               <div class="line"><span><strong>Свободни операции (без ДДС):</strong></span><span><strong>${fmtBgnEur(freeOpsNet)}</strong></span></div>
-               <div class="line"><span><strong>Общо без ДДС:</strong></span><span><strong>${fmtBgnEur(taxBase)}</strong></span></div>
-               <div class="line"><span><strong>ДДС:</strong></span><span><strong>${fmtBgnEur(vatAmount)}</strong></span></div>
-               <div class="line"><span><strong>За плащане:</strong></span><span><strong>${fmtBgnEur(totalAmount)}</strong></span></div>
+               <div class="line"><span><strong>Общо часове:</strong></span><span><strong>${protocolTotalHours.toFixed(2).replace(/\.00$/, '')} ч.</strong></span></div>
+               <div class="line"><span><strong>Цена на час:</strong></span><span><strong>${fmtBgnEur(effectiveHourlyRate)}</strong></span></div>
+                <div class="line"><span><strong>Свободни операции (без ДДС):</strong></span><span><strong>${fmtBgnEur(freeOpsNet)}</strong></span></div>
+                <div class="line"><span><strong>Общо без ДДС:</strong></span><span><strong>${fmtBgnEur(taxBase)}</strong></span></div>
+                <div class="line"><span><strong>ДДС:</strong></span><span><strong>${fmtBgnEur(vatAmount)}</strong></span></div>
+                <div class="line"><span><strong>За плащане:</strong></span><span><strong>${fmtBgnEur(totalAmount)}</strong></span></div>
              </div>
            </div>
 

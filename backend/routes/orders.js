@@ -639,6 +639,12 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
         // Effective hourly rate used in the invoice (admin hourly_rate * applied multipliers)
         const effectiveHourlyRate = hourlyRate * multiplier;
 
+        // For protocol-only display: show equivalent hours derived from manual prices.
+        // Equivalent free-ops hours = freeOpsNet / effectiveHourlyRate.
+        const safeEffectiveHourlyRate = Math.max(0.000001, Number(effectiveHourlyRate) || 0.000001);
+        const freeOpsHoursEqTotal = freeOpsNet / safeEffectiveHourlyRate;
+        const protocolTotalHours = totalHours + freeOpsHoursEqTotal;
+
         const laborTaxBase = totalHours * hourlyRate * multiplier;
         const taxBase = laborTaxBase + freeOpsNet;
         const vatAmount = taxBase * (vatRate / 100);
@@ -677,11 +683,8 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
           </tr>
         `;
 
-        // For manual-priced "Свободни Операции" we print the quantity as *equivalent hours*
-        // and the unit price as the effective hourly rate.
-        // Example: 180 лв at 90 лв/ч => 2.00 hours.
-        const safeEffectiveHourlyRate = Math.max(0.000001, Number(effectiveHourlyRate) || 0.000001);
-
+        // Invoice rows for "Свободни Операции": show ONLY the price.
+        // Quantity stays 1, and unit price equals the line net amount.
         const freeOpsRowsHtml = (freeOpsRows || [])
             .filter((r) => (Number(r?.quantity) || 0) > 0)
             .map((r, i) => {
@@ -689,14 +692,13 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
                 const qty = Number(r?.quantity) || 0;
                 const unit = Number(r?.unit_price_bgn) || 0;
                 const lineNet = qty * unit;
-                const hoursEq = lineNet / safeEffectiveHourlyRate;
                 return `
                   <tr>
                     <td style="text-align:center">${rowNo}</td>
                     <td>${escapeHtml(`Свободни Операции: ${r?.worktime_title || ''}`)}</td>
                     <td>${escapeHtml(order?.reg_number || '')}</td>
-                    <td style="text-align:right">${hoursEq.toFixed(2)}</td>
-                    <td style="text-align:right">${Number(effectiveHourlyRate).toFixed(2)}</td>
+                    <td style="text-align:right">1</td>
+                    <td style="text-align:right">${lineNet.toFixed(2)}</td>
                     <td style="text-align:right">${vatRate.toFixed(2)}%</td>
                     <td style="text-align:right">${lineNet.toFixed(2)}</td>
                   </tr>
@@ -814,21 +816,25 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
   </body>
 </html>`;
 
+        // Protocol rows: for "Свободни Операции" show equivalent hours derived from entered price.
+        // Equivalent hours per unit = unit_price_bgn / effectiveHourlyRate.
         const protocolRowsHtml = (worktimeRows || [])
             .map((r, idx) => {
                 const isFree = String(r?.component_type || '').trim() === FREE_OPS_COMPONENT_TYPE;
-                const h = Number(r.hours) || 0;
                 const q = Number(r.quantity) || 0;
-                const total = h * q;
+                const baseHours = Number(r.hours) || 0;
+                const unitPrice = Number(r.unit_price_bgn) || 0;
+                const hoursPerUnit = isFree ? (unitPrice / safeEffectiveHourlyRate) : baseHours;
+                const total = hoursPerUnit * q;
                 const notes = r.notes ? escapeHtml(r.notes) : '';
                 return `
                   <tr>
                     <td style="text-align:center">${idx + 1}</td>
                     <td>${escapeHtml(r.worktime_title || '')}</td>
                     <td style="white-space: pre-wrap;">${notes}</td>
-                    <td style="text-align:right">${isFree ? '—' : h.toFixed(2).replace(/\.00$/, '')}</td>
+                    <td style="text-align:right">${hoursPerUnit.toFixed(2).replace(/\.00$/, '')}</td>
                     <td style="text-align:right">${q}</td>
-                    <td style="text-align:right">${isFree ? '—' : total.toFixed(2).replace(/\.00$/, '')}</td>
+                    <td style="text-align:right">${total.toFixed(2).replace(/\.00$/, '')}</td>
                   </tr>
                 `;
             })
@@ -911,7 +917,7 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
         ${protocolRowsHtml || '<tr><td colspan="6" class="muted">Няма добавени нормовремена</td></tr>'}
         <tr>
           <td colspan="5" class="right" style="font-weight:900;">Общо часове:</td>
-          <td class="right" style="font-weight:900;">${totalHours.toFixed(2).replace(/\.00$/, '')}</td>
+          <td class="right" style="font-weight:900;">${protocolTotalHours.toFixed(2).replace(/\.00$/, '')}</td>
         </tr>
       </tbody>
     </table>
