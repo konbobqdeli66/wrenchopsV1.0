@@ -5,6 +5,7 @@ import {
   Typography,
   Card,
   CardContent,
+  Divider,
   Table,
   TableBody,
   TableCell,
