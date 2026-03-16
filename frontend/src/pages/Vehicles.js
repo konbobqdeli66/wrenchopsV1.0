@@ -29,7 +29,8 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  useMediaQuery
+  useMediaQuery,
+  Tooltip
 } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
 import ClearIcon from "@mui/icons-material/Clear";
@@ -39,12 +40,16 @@ import BuildIcon from "@mui/icons-material/Build";
 import PersonIcon from "@mui/icons-material/Person";
 import LocalShippingIcon from "@mui/icons-material/LocalShipping";
 import RvHookupIcon from "@mui/icons-material/RvHookup";
+import EditIcon from "@mui/icons-material/Edit";
+import DeleteIcon from "@mui/icons-material/Delete";
 import { getApiBaseUrl } from "../api";
 import { formatCategoryLabel } from "../utils/worktimeClassification";
 
-export default function Vehicles({ t, setPage }) {
+export default function Vehicles({ t, setPage, userRole }) {
   const langCode = (typeof window !== 'undefined' && localStorage.getItem('language')) || 'bg';
   const locale = langCode === 'bg' ? 'bg-BG' : langCode === 'de' ? 'de-DE' : 'en-US';
+
+  const isAdmin = String(userRole || '').trim() === 'admin';
 
   const [vehicles, setVehicles] = useState([]);
   const [searchParams, setSearchParams] = useState({
@@ -65,6 +70,27 @@ export default function Vehicles({ t, setPage }) {
   const [selectedHistoryOrder, setSelectedHistoryOrder] = useState(null);
   const [historyOrderWorktimes, setHistoryOrderWorktimes] = useState([]);
   const [historyOrderWorktimesLoading, setHistoryOrderWorktimesLoading] = useState(false);
+
+  // Admin: add operation row (order_worktimes)
+  const [availableWorktimes, setAvailableWorktimes] = useState([]);
+  const [addOpDialogOpen, setAddOpDialogOpen] = useState(false);
+  const [addOpSaving, setAddOpSaving] = useState(false);
+  const [addOpDraft, setAddOpDraft] = useState({ worktime_id: '', quantity: 1, notes: '', unit_price_bgn: '' });
+  const [addOpSearch, setAddOpSearch] = useState('');
+
+  // Admin: edit history meta (service date + complaint)
+  const [editHistoryOrderDialogOpen, setEditHistoryOrderDialogOpen] = useState(false);
+  const [editHistoryOrderSaving, setEditHistoryOrderSaving] = useState(false);
+  const [editHistoryOrderDraft, setEditHistoryOrderDraft] = useState({
+    service_dt_local: '',
+    complaint: '',
+  });
+
+  // Admin: edit operation row (order_worktimes)
+  const [editOpDialogOpen, setEditOpDialogOpen] = useState(false);
+  const [editOpSaving, setEditOpSaving] = useState(false);
+  const [selectedOpRow, setSelectedOpRow] = useState(null);
+  const [editOpDraft, setEditOpDraft] = useState({ quantity: 1, notes: '', unit_price_bgn: '' });
 
   const fullScreenDialog = useMediaQuery('(max-width:600px)');
 
@@ -109,11 +135,232 @@ export default function Vehicles({ t, setPage }) {
     }
   }
 
+  async function loadAvailableWorktimes(vehicleTypeOverride = null) {
+    try {
+      const vt = vehicleTypeOverride || selectedVehicle?.vehicle_type || 'truck';
+      const stdPromise = axios.get(`${getApiBaseUrl()}/worktimes?vehicle_type=${encodeURIComponent(vt)}`);
+      const freePromise = axios.get(`${getApiBaseUrl()}/worktimes/free_ops?vehicle_type=${encodeURIComponent(vt)}`);
+      const [stdRes, freeRes] = await Promise.allSettled([stdPromise, freePromise]);
+      const std = stdRes.status === 'fulfilled' ? (Array.isArray(stdRes.value.data) ? stdRes.value.data : []) : [];
+      const free = freeRes.status === 'fulfilled' ? (Array.isArray(freeRes.value.data) ? freeRes.value.data : []) : [];
+
+      const byId = new Map();
+      [...std, ...free].forEach((w) => {
+        if (!w?.id) return;
+        byId.set(w.id, w);
+      });
+      setAvailableWorktimes(Array.from(byId.values()));
+    } catch {
+      setAvailableWorktimes([]);
+    }
+  }
+
+  const getOrderServiceDtSqlite = (order) => {
+    return (
+      order?.service_date ||
+      order?.completed_at ||
+      order?.created_at ||
+      ''
+    );
+  };
+
+  const sqliteToLocalInput = (sqliteDt) => {
+    // 'YYYY-MM-DD HH:MM:SS' -> 'YYYY-MM-DDTHH:MM'
+    const s = String(sqliteDt || '').trim();
+    if (!s) return '';
+    const m = s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::\d{2})?$/);
+    if (!m) return '';
+    return `${m[1]}T${m[2]}`;
+  };
+
+  const localInputToIso = (localDt) => {
+    const s = String(localDt || '').trim();
+    if (!s) return null;
+    const d = new Date(s);
+    if (!Number.isFinite(d.getTime())) return null;
+    return d.toISOString();
+  };
+
+  const formatServiceDateForUi = (order) => {
+    const dt = getOrderServiceDtSqlite(order);
+    if (!dt) return '—';
+    // Best-effort parse for SQLite-like strings.
+    const d = new Date(String(dt).replace(' ', 'T') + 'Z');
+    if (!Number.isFinite(d.getTime())) return String(dt);
+    return d.toLocaleString(locale);
+  };
+
+  const openEditHistoryOrder = (order) => {
+    if (!isAdmin) return;
+    if (!order?.id) return;
+    setSelectedHistoryOrder(order);
+    setEditHistoryOrderDraft({
+      service_dt_local: sqliteToLocalInput(getOrderServiceDtSqlite(order)),
+      complaint: String(order?.complaint || ''),
+    });
+    setEditHistoryOrderDialogOpen(true);
+  };
+
+  const saveHistoryOrderEdits = async () => {
+    if (!isAdmin) return;
+    if (!selectedHistoryOrder?.id) return;
+
+    const iso = localInputToIso(editHistoryOrderDraft.service_dt_local);
+    if (!iso) {
+      alert('Моля изберете валидна дата и час.');
+      return;
+    }
+
+    try {
+      setEditHistoryOrderSaving(true);
+      const isCompleted = String(selectedHistoryOrder?.status || '').trim() !== 'active';
+      const payload = {
+        complaint: editHistoryOrderDraft.complaint,
+        ...(isCompleted ? { completed_at: iso } : { created_at: iso }),
+      };
+
+      const res = await axios.put(`${getApiBaseUrl()}/orders/${selectedHistoryOrder.id}`, payload);
+      const updated = res?.data || null;
+
+      // Refresh list
+      if (selectedVehicle?.id) {
+        const h = await axios.get(`${getApiBaseUrl()}/vehicles/${selectedVehicle.id}/history`);
+        setServiceHistory(Array.isArray(h.data) ? h.data : []);
+      }
+
+      if (updated?.id) {
+        setSelectedHistoryOrder((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
+      }
+
+      setEditHistoryOrderDialogOpen(false);
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Грешка при запис на корекциите.');
+    } finally {
+      setEditHistoryOrderSaving(false);
+    }
+  };
+
+  const openEditOp = (ow) => {
+    if (!isAdmin) return;
+    if (!ow?.id) return;
+    setSelectedOpRow(ow);
+    setEditOpDraft({
+      quantity: Number(ow?.quantity) || 1,
+      notes: String(ow?.notes || ''),
+      unit_price_bgn:
+        String(ow?.component_type || '').trim() === 'free_ops'
+          ? String(Number(ow?.unit_price_bgn) || '')
+          : '',
+    });
+    setEditOpDialogOpen(true);
+  };
+
+  const saveOpEdits = async () => {
+    if (!isAdmin) return;
+    if (!selectedHistoryOrder?.id || !selectedOpRow?.id) return;
+    try {
+      setEditOpSaving(true);
+      const isFree = String(selectedOpRow?.component_type || '').trim() === 'free_ops';
+      const payload = {
+        quantity: Math.max(1, parseInt(editOpDraft.quantity, 10) || 1),
+        notes: editOpDraft.notes,
+        ...(isFree
+          ? {
+              unit_price_bgn: Number(String(editOpDraft.unit_price_bgn || '').replace(',', '.')),
+            }
+          : {}),
+      };
+      await axios.put(
+        `${getApiBaseUrl()}/orders/${selectedHistoryOrder.id}/worktimes/${selectedOpRow.id}`,
+        payload
+      );
+      await loadHistoryOrderWorktimes(selectedHistoryOrder.id);
+      setEditOpDialogOpen(false);
+      setSelectedOpRow(null);
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Грешка при запис на операцията.');
+    } finally {
+      setEditOpSaving(false);
+    }
+  };
+
+  const deleteOpRow = async (ow) => {
+    if (!isAdmin) return;
+    if (!selectedHistoryOrder?.id || !ow?.id) return;
+    if (!window.confirm('Сигурни ли сте, че искате да изтриете тази операция?')) return;
+    try {
+      await axios.delete(`${getApiBaseUrl()}/orders/worktimes/${ow.id}`);
+      await loadHistoryOrderWorktimes(selectedHistoryOrder.id);
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Грешка при изтриване на операцията.');
+    }
+  };
+
   const openHistoryOrderDetails = async (order) => {
     setSelectedHistoryOrder(order);
     setOrderDetailsDialogOpen(true);
     await loadHistoryOrderWorktimes(order.id);
+
+    if (isAdmin) {
+      const vt = selectedVehicle?.vehicle_type === 'trailer' ? 'trailer' : 'truck';
+      await loadAvailableWorktimes(vt);
+    }
   };
+
+  const openAddOperation = () => {
+    if (!isAdmin) return;
+    if (!selectedHistoryOrder?.id) return;
+    setAddOpDraft({ worktime_id: '', quantity: 1, notes: '', unit_price_bgn: '' });
+    setAddOpSearch('');
+    setAddOpDialogOpen(true);
+  };
+
+  const saveAddedOperation = async () => {
+    if (!isAdmin) return;
+    if (!selectedHistoryOrder?.id) return;
+    const worktimeId = Number(addOpDraft.worktime_id);
+    if (!Number.isFinite(worktimeId) || worktimeId <= 0) {
+      alert('Моля изберете операция (нормовреме).');
+      return;
+    }
+
+    const wt = (availableWorktimes || []).find((w) => Number(w?.id) === worktimeId);
+    const isFree = String(wt?.component_type || '').trim() === 'free_ops';
+
+    const qty = Math.max(1, parseInt(addOpDraft.quantity, 10) || 1);
+
+    let unitPricePayload = {};
+    if (isFree) {
+      const parsed = Number(String(addOpDraft.unit_price_bgn || '').replace(',', '.'));
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        alert('Моля въведете валидна цена (>= 0 лв).');
+        return;
+      }
+      unitPricePayload = { unit_price_bgn: parsed };
+    }
+
+    try {
+      setAddOpSaving(true);
+      await axios.post(`${getApiBaseUrl()}/orders/${selectedHistoryOrder.id}/worktimes`, {
+        worktime_id: worktimeId,
+        quantity: qty,
+        notes: addOpDraft.notes,
+        ...unitPricePayload,
+      });
+      await loadHistoryOrderWorktimes(selectedHistoryOrder.id);
+      setAddOpDialogOpen(false);
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Грешка при добавяне на операция.');
+    } finally {
+      setAddOpSaving(false);
+    }
+  };
+
+  const filteredAvailableWorktimes = (availableWorktimes || []).filter((w) => {
+    const q = String(addOpSearch || '').trim().toLowerCase();
+    if (!q) return true;
+    return String(w?.title || '').toLowerCase().includes(q);
+  });
 
   const handleVehicleClick = (vehicle) => {
     setSelectedVehicle(vehicle);
@@ -456,8 +703,7 @@ export default function Vehicles({ t, setPage }) {
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, width: '100%' }}>
                       <BuildIcon color="primary" />
                       <Typography variant="subtitle1">
-                        {new Date(order.created_at).toLocaleDateString('bg-BG')}
-                        {new Date(order.created_at).toLocaleDateString(locale)}
+                        {formatServiceDateForUi(order)}
                       </Typography>
                       <Chip
                         label={order.status === 'active' ? t('statusActive') : t('statusCompleted')}
@@ -482,6 +728,19 @@ export default function Vehicles({ t, setPage }) {
                     <Typography variant="body2" color="text.secondary">
                       {t('client')}: {order.client_name}
                     </Typography>
+
+                    {isAdmin ? (
+                      <Box sx={{ mt: 1.5, display: 'flex', justifyContent: 'flex-end', gap: 1, flexWrap: 'wrap' }}>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<EditIcon />}
+                          onClick={() => openEditHistoryOrder(order)}
+                        >
+                          Редактирай история
+                        </Button>
+                      </Box>
+                    ) : null}
 
                     {order.status !== 'active' && (
                       <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
@@ -533,11 +792,24 @@ export default function Vehicles({ t, setPage }) {
                 {t('client')}: <strong>{selectedHistoryOrder.client_name}</strong>
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                {t('date')}: <strong>{new Date(selectedHistoryOrder.created_at).toLocaleString(locale)}</strong>
+                {t('date')}: <strong>{formatServiceDateForUi(selectedHistoryOrder)}</strong>
               </Typography>
               <Typography variant="body2" sx={{ mt: 1 }}>
                 <strong>{t('complaintLabel')}:</strong> {selectedHistoryOrder.complaint}
               </Typography>
+
+              {isAdmin ? (
+                <Box sx={{ mt: 1.25, display: 'flex', justifyContent: 'flex-end' }}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<EditIcon />}
+                    onClick={() => openEditHistoryOrder(selectedHistoryOrder)}
+                  >
+                    Редактирай
+                  </Button>
+                </Box>
+              ) : null}
             </Box>
           )}
 
@@ -605,6 +877,7 @@ export default function Vehicles({ t, setPage }) {
                         <TableCell align="right"><strong>{t('quantityShort')}</strong></TableCell>
                         <TableCell align="right"><strong>{t('total')}</strong></TableCell>
                         <TableCell><strong>{t('notes')}</strong></TableCell>
+                        {isAdmin ? <TableCell align="right"><strong>{t('actions')}</strong></TableCell> : null}
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -621,6 +894,20 @@ export default function Vehicles({ t, setPage }) {
                             <TableCell align="right">{qty}</TableCell>
                             <TableCell align="right">{total.toFixed(2).replace(/\.00$/, '')}</TableCell>
                             <TableCell sx={{ whiteSpace: 'pre-wrap' }}>{ow.notes || '—'}</TableCell>
+                            {isAdmin ? (
+                              <TableCell align="right">
+                                <Tooltip title="Редакция">
+                                  <IconButton size="small" onClick={() => openEditOp(ow)}>
+                                    <EditIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                                <Tooltip title="Изтрий">
+                                  <IconButton size="small" color="error" onClick={() => deleteOpRow(ow)}>
+                                    <DeleteIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                              </TableCell>
+                            ) : null}
                           </TableRow>
                         );
                       })}
@@ -632,6 +919,11 @@ export default function Vehicles({ t, setPage }) {
           )}
         </DialogContent>
         <DialogActions>
+          {isAdmin ? (
+            <Button variant="outlined" onClick={openAddOperation} startIcon={<BuildIcon />}>
+              Добави операция
+            </Button>
+          ) : null}
           <Button
             onClick={() => {
               setOrderDetailsDialogOpen(false);
@@ -640,6 +932,255 @@ export default function Vehicles({ t, setPage }) {
             }}
           >
             {t('close')}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Admin: add operation (order_worktimes row) */}
+      <Dialog
+        open={addOpDialogOpen}
+        onClose={() => {
+          if (addOpSaving) return;
+          setAddOpDialogOpen(false);
+        }}
+        maxWidth="md"
+        fullWidth
+        fullScreen={fullScreenDialog}
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <BuildIcon />
+          Добавяне на операция
+        </DialogTitle>
+        <DialogContent sx={{ pt: 2 }}>
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Търси операция"
+                value={addOpSearch}
+                onChange={(e) => setAddOpSearch(e.target.value)}
+                placeholder="Пример: Смяна на масло"
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TableContainer component={Paper} variant="outlined">
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell><strong>Операция</strong></TableCell>
+                      <TableCell><strong>Компонент</strong></TableCell>
+                      <TableCell align="right"><strong>Часове</strong></TableCell>
+                      <TableCell align="right"><strong>Избери</strong></TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {filteredAvailableWorktimes.slice(0, 100).map((w) => {
+                      const selected = String(addOpDraft.worktime_id) === String(w.id);
+                      return (
+                        <TableRow key={w.id} hover selected={selected}>
+                          <TableCell sx={{ fontWeight: 800 }}>{w.title}</TableCell>
+                          <TableCell>{String(w.component_type || '')}</TableCell>
+                          <TableCell align="right">{Number(w.hours || 0).toFixed(2).replace(/\.00$/, '')}</TableCell>
+                          <TableCell align="right">
+                            <Button
+                              size="small"
+                              variant={selected ? 'contained' : 'outlined'}
+                              onClick={() => setAddOpDraft((prev) => ({ ...prev, worktime_id: String(w.id) }))}
+                            >
+                              {selected ? 'Избрано' : 'Избери'}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {filteredAvailableWorktimes.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4} align="center">
+                          Няма намерени операции.
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Grid>
+
+            <Grid item xs={12} sm={4}>
+              <TextField
+                fullWidth
+                label={t('quantityShort')}
+                type="number"
+                inputProps={{ min: 1, step: 1 }}
+                value={addOpDraft.quantity}
+                onChange={(e) => setAddOpDraft((prev) => ({ ...prev, quantity: e.target.value }))}
+              />
+            </Grid>
+
+            {(() => {
+              const wt = (availableWorktimes || []).find((w) => String(w?.id) === String(addOpDraft.worktime_id));
+              const isFree = String(wt?.component_type || '').trim() === 'free_ops';
+              if (!isFree) return null;
+              return (
+                <Grid item xs={12} sm={8}>
+                  <TextField
+                    fullWidth
+                    label="Ед. цена (лв)"
+                    type="number"
+                    inputProps={{ min: 0, step: '0.01' }}
+                    value={addOpDraft.unit_price_bgn}
+                    onChange={(e) => setAddOpDraft((prev) => ({ ...prev, unit_price_bgn: e.target.value }))}
+                  />
+                </Grid>
+              );
+            })()}
+
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label={t('notes')}
+                multiline
+                minRows={3}
+                value={addOpDraft.notes}
+                onChange={(e) => setAddOpDraft((prev) => ({ ...prev, notes: e.target.value }))}
+              />
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAddOpDialogOpen(false)} disabled={addOpSaving}>
+            {t('cancel')}
+          </Button>
+          <Button variant="contained" onClick={saveAddedOperation} disabled={addOpSaving}>
+            {addOpSaving ? t('saving') : 'Добави'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Admin: edit history order (date + complaint) */}
+      <Dialog
+        open={editHistoryOrderDialogOpen}
+        onClose={() => {
+          if (editHistoryOrderSaving) return;
+          setEditHistoryOrderDialogOpen(false);
+        }}
+        maxWidth="sm"
+        fullWidth
+        fullScreen={fullScreenDialog}
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <EditIcon />
+          Ръчна корекция на сервизна история
+        </DialogTitle>
+        <DialogContent sx={{ pt: 2 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Поръчка: <strong>#{selectedHistoryOrder?.id}</strong> • {selectedHistoryOrder?.reg_number}
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Дата/час на ремонт"
+                type="datetime-local"
+                value={editHistoryOrderDraft.service_dt_local}
+                onChange={(e) =>
+                  setEditHistoryOrderDraft((prev) => ({ ...prev, service_dt_local: e.target.value }))
+                }
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Какво е правено / оплакване"
+                value={editHistoryOrderDraft.complaint}
+                onChange={(e) =>
+                  setEditHistoryOrderDraft((prev) => ({ ...prev, complaint: e.target.value }))
+                }
+                multiline
+                minRows={3}
+              />
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditHistoryOrderDialogOpen(false)} disabled={editHistoryOrderSaving}>
+            {t('cancel')}
+          </Button>
+          <Button variant="contained" onClick={saveHistoryOrderEdits} disabled={editHistoryOrderSaving}>
+            {editHistoryOrderSaving ? t('saving') : t('save')}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Admin: edit operation row */}
+      <Dialog
+        open={editOpDialogOpen}
+        onClose={() => {
+          if (editOpSaving) return;
+          setEditOpDialogOpen(false);
+          setSelectedOpRow(null);
+        }}
+        maxWidth="sm"
+        fullWidth
+        fullScreen={fullScreenDialog}
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <EditIcon />
+          Редакция на операция
+        </DialogTitle>
+        <DialogContent sx={{ pt: 2 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            {selectedOpRow?.worktime_title}
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid item xs={12} sm={4}>
+              <TextField
+                fullWidth
+                label={t('quantityShort')}
+                type="number"
+                inputProps={{ min: 1, step: 1 }}
+                value={editOpDraft.quantity}
+                onChange={(e) => setEditOpDraft((prev) => ({ ...prev, quantity: e.target.value }))}
+              />
+            </Grid>
+            {String(selectedOpRow?.component_type || '').trim() === 'free_ops' ? (
+              <Grid item xs={12} sm={8}>
+                <TextField
+                  fullWidth
+                  label="Ед. цена (лв)"
+                  type="number"
+                  inputProps={{ min: 0, step: '0.01' }}
+                  value={editOpDraft.unit_price_bgn}
+                  onChange={(e) =>
+                    setEditOpDraft((prev) => ({ ...prev, unit_price_bgn: e.target.value }))
+                  }
+                />
+              </Grid>
+            ) : null}
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label={t('notes')}
+                multiline
+                minRows={3}
+                value={editOpDraft.notes}
+                onChange={(e) => setEditOpDraft((prev) => ({ ...prev, notes: e.target.value }))}
+              />
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setEditOpDialogOpen(false);
+              setSelectedOpRow(null);
+            }}
+            disabled={editOpSaving}
+          >
+            {t('cancel')}
+          </Button>
+          <Button variant="contained" onClick={saveOpEdits} disabled={editOpSaving}>
+            {editOpSaving ? t('saving') : t('save')}
           </Button>
         </DialogActions>
       </Dialog>

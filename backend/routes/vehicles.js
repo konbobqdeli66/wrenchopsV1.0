@@ -178,13 +178,16 @@ router.delete('/:id', checkPermission('vehicles', 'delete'), (req, res) => {
 // Get service history for a vehicle
 router.get('/:id/history', checkPermission('vehicles', 'read'), (req, res) => {
   const query = `
-    SELECT o.*, c.name as client_name
+    SELECT
+      o.*,
+      COALESCE(c.name, o.client_name) as client_name,
+      COALESCE(o.completed_at, o.created_at) as service_date
     FROM orders o
-    JOIN clients c ON o.client_name = c.name
+    LEFT JOIN clients c ON o.client_id = c.id
     WHERE o.reg_number = (
       SELECT reg_number FROM vehicles WHERE id = ?
     )
-    ORDER BY o.created_at DESC
+    ORDER BY datetime(COALESCE(o.completed_at, o.created_at)) DESC, o.id DESC
   `;
 
   db.all(query, [req.params.id], (err, rows) => {

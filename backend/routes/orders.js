@@ -261,12 +261,92 @@ router.post('/', checkPermission('orders', 'write'), (req, res) => {
 // Редакция на поръчка (преди фактуриране)
 router.put('/:id', checkPermission('orders', 'write'), (req, res) => {
     const { id } = req.params;
-    const { client_name, reg_number, complaint, status } = req.body;
+    const body = req.body || {};
+
+    const isAdmin = String(req.user?.role || '').trim() === 'admin';
+
+    const normalizeDateTime = (raw) => {
+        // Accept:
+        // - ISO: 2026-03-16T12:34:56.000Z
+        // - SQLite: 2026-03-16 12:34:56
+        // - Date-only: 2026-03-16
+        const s = String(raw ?? '').trim();
+        if (!s) return null;
+
+        let iso = s;
+        const sqliteFull = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/;
+        const dateOnly = /^\d{4}-\d{2}-\d{2}$/;
+
+        if (dateOnly.test(s)) {
+            iso = `${s}T00:00:00Z`;
+        } else if (sqliteFull.test(s)) {
+            const withSeconds = s.length === 16 ? `${s}:00` : s; // YYYY-MM-DD HH:MM -> add :SS
+            iso = `${withSeconds.replace(' ', 'T')}Z`;
+        }
+
+        const d = new Date(iso);
+        if (!Number.isFinite(d.getTime())) return undefined;
+        // Store in SQLite-compatible UTC format.
+        return d.toISOString().replace('T', ' ').slice(0, 19);
+    };
+
+    const updates = [];
+    const params = [];
+    const setField = (field, value) => {
+        updates.push(`${field} = ?`);
+        params.push(value);
+    };
+
+    // Allow editing these fields for any user with orders:write (admin bypasses permissions anyway)
+    if (Object.prototype.hasOwnProperty.call(body, 'client_name')) {
+        const v = body.client_name === null ? null : String(body.client_name ?? '').trim();
+        setField('client_name', v === '' ? null : v);
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'reg_number')) {
+        const v = body.reg_number === null ? null : String(body.reg_number ?? '').trim();
+        setField('reg_number', v === '' ? null : v);
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'complaint')) {
+        const v = body.complaint === null ? null : String(body.complaint ?? '').trim();
+        setField('complaint', v === '' ? null : v);
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'status')) {
+        const v = body.status === null ? null : String(body.status ?? '').trim();
+        setField('status', v === '' ? null : v);
+    }
+
+    // Admin-only: allow correcting timestamps used in service history/invoicing.
+    if (isAdmin && Object.prototype.hasOwnProperty.call(body, 'created_at')) {
+        if (body.created_at === null) {
+            setField('created_at', null);
+        } else {
+            const v = normalizeDateTime(body.created_at);
+            if (v === undefined) {
+                return res.status(400).json({ error: 'Невалиден формат за created_at' });
+            }
+            setField('created_at', v);
+        }
+    }
+    if (isAdmin && Object.prototype.hasOwnProperty.call(body, 'completed_at')) {
+        if (body.completed_at === null) {
+            setField('completed_at', null);
+        } else {
+            const v = normalizeDateTime(body.completed_at);
+            if (v === undefined) {
+                return res.status(400).json({ error: 'Невалиден формат за completed_at' });
+            }
+            setField('completed_at', v);
+        }
+    }
+
+    if (!updates.length) {
+        return res.status(400).json({ error: 'Няма подадени полета за промяна.' });
+    }
 
     db.run(
-        'UPDATE orders SET client_name = COALESCE(?, client_name), reg_number = COALESCE(?, reg_number), complaint = COALESCE(?, complaint), status = COALESCE(?, status) WHERE id = ?',
-        [client_name ?? null, reg_number ?? null, complaint ?? null, status ?? null, id],
-        function(err) {
+        `UPDATE orders SET ${updates.join(', ')} WHERE id = ?`,
+        [...params, id],
+        function (err) {
             if (err) {
                 res.status(500).json({ error: err.message });
                 return;
@@ -996,7 +1076,7 @@ router.delete('/:id', checkPermission('orders', 'delete'), (req, res) => {
 // Добавяне на нормовреме към поръчка
 router.post('/:orderId/worktimes', checkPermission('orders', 'write'), (req, res) => {
     const { orderId } = req.params;
-    const { worktime_id, quantity, notes } = req.body;
+    const { worktime_id, quantity, notes, unit_price_bgn } = req.body;
 
     if (!worktime_id) {
         return res.status(400).json({ error: 'worktime_id е задължително поле' });
@@ -1005,7 +1085,18 @@ router.post('/:orderId/worktimes', checkPermission('orders', 'write'), (req, res
     const qtyToAdd = Math.max(1, parseInt(quantity, 10) || 1);
     const cleanNotes = String(notes || '').trim();
 
-    const continueAdd = () => {
+    const parsedUnitPrice =
+        unit_price_bgn === undefined || unit_price_bgn === null || String(unit_price_bgn).trim() === ''
+            ? null
+            : Number(String(unit_price_bgn).replace(',', '.'));
+
+    if (parsedUnitPrice !== null && (!Number.isFinite(parsedUnitPrice) || parsedUnitPrice < 0)) {
+        return res.status(400).json({ error: 'unit_price_bgn must be a non-negative number' });
+    }
+
+    const continueAdd = ({ isFreeOps }) => {
+        const safeUnitPrice = isFreeOps ? parsedUnitPrice : null;
+
         // If the user adds the same worktime again WITHOUT notes, increment quantity
         // instead of creating a duplicate row. If notes are provided, keep a separate row.
         if (!cleanNotes) {
@@ -1014,10 +1105,11 @@ router.post('/:orderId/worktimes', checkPermission('orders', 'write'), (req, res
                     SELECT id, quantity
                     FROM order_worktimes
                     WHERE order_id = ? AND worktime_id = ? AND TRIM(COALESCE(notes, '')) = ''
+                      ${isFreeOps ? 'AND COALESCE(unit_price_bgn, 0) = COALESCE(?, 0)' : ''}
                     ORDER BY created_at DESC
                     LIMIT 1
                 `,
-                [orderId, worktime_id],
+                isFreeOps ? [orderId, worktime_id, safeUnitPrice] : [orderId, worktime_id],
                 (findErr, existing) => {
                     if (findErr) {
                         return res.status(500).json({ error: findErr.message });
@@ -1054,8 +1146,8 @@ router.post('/:orderId/worktimes', checkPermission('orders', 'write'), (req, res
 
                     // No existing "no-notes" row, insert a new one.
                     db.run(
-                        'INSERT INTO order_worktimes (order_id, worktime_id, quantity, notes) VALUES (?, ?, ?, ?)',
-                        [orderId, worktime_id, qtyToAdd, ''],
+                        'INSERT INTO order_worktimes (order_id, worktime_id, quantity, unit_price_bgn, notes) VALUES (?, ?, ?, ?, ?)',
+                        [orderId, worktime_id, qtyToAdd, safeUnitPrice, ''],
                         function (insErr) {
                             if (insErr) {
                                 return res.status(500).json({ error: insErr.message });
@@ -1081,11 +1173,11 @@ router.post('/:orderId/worktimes', checkPermission('orders', 'write'), (req, res
             );
             return;
         }
-
+        
         // Notes provided -> always insert as a separate row.
         db.run(
-            'INSERT INTO order_worktimes (order_id, worktime_id, quantity, notes) VALUES (?, ?, ?, ?)',
-            [orderId, worktime_id, qtyToAdd, cleanNotes],
+            'INSERT INTO order_worktimes (order_id, worktime_id, quantity, unit_price_bgn, notes) VALUES (?, ?, ?, ?, ?)',
+            [orderId, worktime_id, qtyToAdd, safeUnitPrice, cleanNotes],
             function(err) {
                 if (err) {
                     res.status(500).json({ error: err.message });
@@ -1117,6 +1209,8 @@ router.post('/:orderId/worktimes', checkPermission('orders', 'write'), (req, res
             return res.status(400).json({ error: 'Невалидно worktime_id' });
         }
 
+        const isFreeOps = String(wtRow?.component_type || '').trim() === FREE_OPS_COMPONENT_TYPE;
+
         if (String(req.user?.role || '').trim() !== 'admin') {
             const groupPermsMap = await loadWorktimesGroupPermissionsMap(db, req.user?.id);
             const vt = String(wtRow?.vehicle_type || '').trim().toLowerCase() === 'trailer' ? 'trailer' : 'truck';
@@ -1132,7 +1226,7 @@ router.post('/:orderId/worktimes', checkPermission('orders', 'write'), (req, res
             }
         }
 
-        return continueAdd();
+        return continueAdd({ isFreeOps });
     });
 });
 

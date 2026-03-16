@@ -1117,7 +1117,7 @@ function MainApp() {
           {page === 1 && <Clients setPage={setPage} t={t} />}
           {page === 2 && <Orders t={t} userPermissions={userPermissions} userRole={userRole} />}
           {page === 3 && <Worktimes t={t} userPermissions={userPermissions} userRole={userRole} />}
-          {page === 4 && <Vehicles setPage={setPage} t={t} />}
+          {page === 4 && <Vehicles setPage={setPage} t={t} userRole={userRole} userPermissions={userPermissions} />}
           {page === 5 && <Invoices t={t} canDeleteInvoices={canDeleteInvoices} />}
           {page === 6 && userRole === 'admin' && <Admin t={t} />}
         </Container>

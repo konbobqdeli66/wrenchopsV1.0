@@ -869,6 +869,9 @@ export default function Invoices({ canDeleteInvoices = false }) {
       .reduce((sum, ow) => sum + (Number(ow?.unit_price_bgn) || 0) * (Number(ow?.quantity) || 0), 0);
   }, [orderWorktimes]);
 
+  // NOTE: currently used only as an internal preview helper; keep build clean.
+  void freeOpsNetPreview;
+
   const appliedMultiplierPreview = useMemo(() => {
     // If already invoiced, keep the stored multipliers (don’t allow changing pricing on an existing invoice).
     if (invoicedDocForSelectedOrder) {
