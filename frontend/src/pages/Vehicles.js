@@ -92,6 +92,7 @@ export default function Vehicles({ t, setPage, userRole }) {
   const [editHistoryOrderSaving, setEditHistoryOrderSaving] = useState(false);
   const [editHistoryOrderDraft, setEditHistoryOrderDraft] = useState({
     service_dt_local: '',
+    odometer_km: '',
     complaint: '',
   });
 
@@ -205,6 +206,7 @@ export default function Vehicles({ t, setPage, userRole }) {
     setSelectedHistoryOrder(order);
     setEditHistoryOrderDraft({
       service_dt_local: sqliteToLocalInput(getOrderServiceDtSqlite(order)),
+      odometer_km: order?.odometer_km === null || order?.odometer_km === undefined ? '' : String(order?.odometer_km),
       complaint: String(order?.complaint || ''),
     });
     setEditHistoryOrderDialogOpen(true);
@@ -273,11 +275,19 @@ export default function Vehicles({ t, setPage, userRole }) {
       return;
     }
 
+    const odoRaw = String(editHistoryOrderDraft.odometer_km || '').trim();
+    const odo = odoRaw ? Number(odoRaw.replace(',', '.')) : null;
+    if (odo !== null && (!Number.isFinite(odo) || odo < 0)) {
+      alert('Моля въведете валидни километри (>= 0).');
+      return;
+    }
+
     try {
       setEditHistoryOrderSaving(true);
       const isCompleted = String(selectedHistoryOrder?.status || '').trim() !== 'active';
       const payload = {
         complaint: editHistoryOrderDraft.complaint,
+        odometer_km: odo,
         ...(isCompleted ? { completed_at: iso } : { created_at: iso }),
       };
 
@@ -300,6 +310,14 @@ export default function Vehicles({ t, setPage, userRole }) {
     } finally {
       setEditHistoryOrderSaving(false);
     }
+  };
+
+  const formatOdometerForUi = (order) => {
+    const km = order?.odometer_km;
+    if (km === null || km === undefined || km === '') return '—';
+    const n = Number(km);
+    if (!Number.isFinite(n)) return String(km);
+    return n.toLocaleString(locale);
   };
 
   const openEditOp = (ow) => {
@@ -772,6 +790,12 @@ export default function Vehicles({ t, setPage, userRole }) {
                         color={order.status === 'active' ? 'primary' : 'default'}
                         size="small"
                       />
+                      <Chip
+                        label={`Км: ${formatOdometerForUi(order)}`}
+                        size="small"
+                        variant="outlined"
+                        sx={{ fontWeight: 800 }}
+                      />
                       {order.status !== 'active' && (
                         <Chip
                           label={t('details')}
@@ -786,6 +810,9 @@ export default function Vehicles({ t, setPage, userRole }) {
                   <AccordionDetails>
                     <Typography variant="body1" sx={{ mb: 1 }}>
                       <strong>Оплакване:</strong> {order.complaint}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                      {t('odometer') || 'Километри'}: <strong>{formatOdometerForUi(order)} км</strong>
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
                       {t('client')}: {order.client_name}
@@ -928,6 +955,9 @@ export default function Vehicles({ t, setPage, userRole }) {
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 {t('date')}: <strong>{formatServiceDateForUi(selectedHistoryOrder)}</strong>
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {t('odometer') || 'Километри'}: <strong>{formatOdometerForUi(selectedHistoryOrder)} км</strong>
               </Typography>
               <Typography variant="body2" sx={{ mt: 1 }}>
                 <strong>{t('complaintLabel')}:</strong> {selectedHistoryOrder.complaint}
@@ -1221,6 +1251,18 @@ export default function Vehicles({ t, setPage, userRole }) {
                   setEditHistoryOrderDraft((prev) => ({ ...prev, service_dt_local: e.target.value }))
                 }
                 InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Километри (км)"
+                type="number"
+                inputProps={{ min: 0, step: 1 }}
+                value={editHistoryOrderDraft.odometer_km}
+                onChange={(e) =>
+                  setEditHistoryOrderDraft((prev) => ({ ...prev, odometer_km: e.target.value }))
+                }
               />
             </Grid>
             <Grid item xs={12}>
