@@ -36,7 +36,14 @@ const normalizeDateTime = (raw) => {
 // Get all vehicles with client info
 router.get('/', checkPermission('vehicles', 'read'), (req, res) => {
   const query = `
-    SELECT v.*, c.name as client_name
+    SELECT
+      v.*,
+      c.name as client_name,
+      (
+        SELECT COUNT(1)
+        FROM orders o
+        WHERE UPPER(o.reg_number) = UPPER(v.reg_number)
+      ) as history_count
     FROM vehicles v
     JOIN clients c ON v.client_id = c.id
     ORDER BY v.brand, v.model
@@ -63,7 +70,14 @@ router.get('/search', checkPermission('vehicles', 'read'), (req, res) => {
   // NOTE: SQLite NOCASE/LOWER/UPPER are ASCII-only by default.
   // To make searches ignore upper/lower for Cyrillic/Unicode, we filter in JS.
   const baseQuery = `
-    SELECT v.*, c.name as client_name
+    SELECT
+      v.*,
+      c.name as client_name,
+      (
+        SELECT COUNT(1)
+        FROM orders o
+        WHERE UPPER(o.reg_number) = UPPER(v.reg_number)
+      ) as history_count
     FROM vehicles v
     JOIN clients c ON v.client_id = c.id
     ORDER BY v.brand, v.model
@@ -112,7 +126,14 @@ router.get('/search', checkPermission('vehicles', 'read'), (req, res) => {
 // Get vehicles for a specific client
 router.get('/client/:clientId', checkPermission('vehicles', 'read'), (req, res) => {
   const query = `
-    SELECT v.*, c.name as client_name
+    SELECT
+      v.*,
+      c.name as client_name,
+      (
+        SELECT COUNT(1)
+        FROM orders o
+        WHERE UPPER(o.reg_number) = UPPER(v.reg_number)
+      ) as history_count
     FROM vehicles v
     JOIN clients c ON v.client_id = c.id
     WHERE v.client_id = ?
@@ -130,7 +151,14 @@ router.get('/client/:clientId', checkPermission('vehicles', 'read'), (req, res) 
 // Get single vehicle by ID
 router.get('/:id', checkPermission('vehicles', 'read'), (req, res) => {
   const query = `
-    SELECT v.*, c.name as client_name
+    SELECT
+      v.*,
+      c.name as client_name,
+      (
+        SELECT COUNT(1)
+        FROM orders o
+        WHERE UPPER(o.reg_number) = UPPER(v.reg_number)
+      ) as history_count
     FROM vehicles v
     JOIN clients c ON v.client_id = c.id
     WHERE v.id = ?

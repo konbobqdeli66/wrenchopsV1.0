@@ -447,6 +447,12 @@ export default function Vehicles({ t, setPage, userRole }) {
     loadServiceHistory(vehicle.id);
   };
 
+  const getHistoryCountLabel = (vehicle) => {
+    const n = Number(vehicle?.history_count);
+    const safe = Number.isFinite(n) ? n : 0;
+    return `${safe} ${safe === 1 ? 'запис' : 'записа'}`;
+  };
+
   const clearSearch = () => {
     setSearchParams({
       q: '',
@@ -653,7 +659,7 @@ export default function Vehicles({ t, setPage, userRole }) {
                             handleVehicleClick(vehicle);
                           }}
                         >
-                          {t('history')}
+                          {t('history')} ({getHistoryCountLabel(vehicle)})
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -727,7 +733,7 @@ export default function Vehicles({ t, setPage, userRole }) {
                               handleVehicleClick(vehicle);
                             }}
                           >
-                            {t('history')}
+                            {t('history')} ({getHistoryCountLabel(vehicle)})
                           </Button>
                         </Box>
                       </CardContent>
