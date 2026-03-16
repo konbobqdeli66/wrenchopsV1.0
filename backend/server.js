@@ -520,6 +520,14 @@ db.run("ALTER TABLE orders ADD COLUMN completed_at TEXT", (err) => {
   }
 });
 
+// Vehicle service history metadata
+db.run('ALTER TABLE orders ADD COLUMN odometer_km INTEGER', (err) => {
+  const msg = String(err?.message || '').toLowerCase();
+  if (err && !msg.includes('duplicate column') && !msg.includes('no such table')) {
+    console.warn('Could not add orders.odometer_km column:', err.message);
+  }
+});
+
 db.run("ALTER TABLE orders ADD COLUMN client_id INTEGER", (err) => {
   // Ignore if the column already exists
   if (err && !String(err.message || '').toLowerCase().includes('duplicate column')) {

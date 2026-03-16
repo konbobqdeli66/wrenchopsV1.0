@@ -78,6 +78,15 @@ export default function Vehicles({ t, setPage, userRole }) {
   const [addOpDraft, setAddOpDraft] = useState({ worktime_id: '', quantity: 1, notes: '', unit_price_bgn: '' });
   const [addOpSearch, setAddOpSearch] = useState('');
 
+  // Admin: add a NEW history entry (manual completed order)
+  const [addHistoryEntryDialogOpen, setAddHistoryEntryDialogOpen] = useState(false);
+  const [addHistoryEntrySaving, setAddHistoryEntrySaving] = useState(false);
+  const [addHistoryEntryDraft, setAddHistoryEntryDraft] = useState({
+    service_dt_local: '',
+    odometer_km: '',
+    complaint: '',
+  });
+
   // Admin: edit history meta (service date + complaint)
   const [editHistoryOrderDialogOpen, setEditHistoryOrderDialogOpen] = useState(false);
   const [editHistoryOrderSaving, setEditHistoryOrderSaving] = useState(false);
@@ -199,6 +208,59 @@ export default function Vehicles({ t, setPage, userRole }) {
       complaint: String(order?.complaint || ''),
     });
     setEditHistoryOrderDialogOpen(true);
+  };
+
+  const openAddHistoryEntry = () => {
+    if (!isAdmin) return;
+    if (!selectedVehicle?.id) return;
+
+    // Default: now
+    const now = new Date();
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const local = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}T${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+
+    setAddHistoryEntryDraft({
+      service_dt_local: local,
+      odometer_km: '',
+      complaint: '',
+    });
+    setAddHistoryEntryDialogOpen(true);
+  };
+
+  const saveNewHistoryEntry = async () => {
+    if (!isAdmin) return;
+    if (!selectedVehicle?.id) return;
+
+    const iso = localInputToIso(addHistoryEntryDraft.service_dt_local);
+    if (!iso) {
+      alert('Моля изберете валидна дата и час.');
+      return;
+    }
+
+    const odoRaw = String(addHistoryEntryDraft.odometer_km || '').trim();
+    const odo = odoRaw ? Number(odoRaw.replace(',', '.')) : null;
+    if (odo !== null && (!Number.isFinite(odo) || odo < 0)) {
+      alert('Моля въведете валидни километри (>= 0).');
+      return;
+    }
+
+    try {
+      setAddHistoryEntrySaving(true);
+      await axios.post(`${getApiBaseUrl()}/vehicles/${selectedVehicle.id}/history`, {
+        service_date: iso,
+        odometer_km: odo,
+        complaint: addHistoryEntryDraft.complaint,
+      });
+
+      // Refresh history list
+      const h = await axios.get(`${getApiBaseUrl()}/vehicles/${selectedVehicle.id}/history`);
+      setServiceHistory(Array.isArray(h.data) ? h.data : []);
+      setAddHistoryEntryDialogOpen(false);
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Грешка при добавяне на запис в историята.');
+    } finally {
+      setAddHistoryEntrySaving(false);
+    }
   };
 
   const saveHistoryOrderEdits = async () => {
@@ -765,7 +827,80 @@ export default function Vehicles({ t, setPage, userRole }) {
           )}
         </DialogContent>
         <DialogActions>
+          {isAdmin ? (
+            <Button variant="outlined" onClick={openAddHistoryEntry} startIcon={<BuildIcon />}>
+              Добави запис
+            </Button>
+          ) : null}
           <Button onClick={() => setHistoryDialogOpen(false)}>{t('close')}</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Admin: add NEW history entry */}
+      <Dialog
+        open={addHistoryEntryDialogOpen}
+        onClose={() => {
+          if (addHistoryEntrySaving) return;
+          setAddHistoryEntryDialogOpen(false);
+        }}
+        maxWidth="sm"
+        fullWidth
+        fullScreen={fullScreenDialog}
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <BuildIcon />
+          Нов запис в сервизна история
+        </DialogTitle>
+        <DialogContent sx={{ pt: 2 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Автомобил: <strong>{selectedVehicle?.reg_number}</strong>
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Дата/час на ремонт"
+                type="datetime-local"
+                value={addHistoryEntryDraft.service_dt_local}
+                onChange={(e) =>
+                  setAddHistoryEntryDraft((prev) => ({ ...prev, service_dt_local: e.target.value }))
+                }
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Километри (км)"
+                type="number"
+                inputProps={{ min: 0, step: 1 }}
+                value={addHistoryEntryDraft.odometer_km}
+                onChange={(e) =>
+                  setAddHistoryEntryDraft((prev) => ({ ...prev, odometer_km: e.target.value }))
+                }
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Какво е правено / ремонт"
+                value={addHistoryEntryDraft.complaint}
+                onChange={(e) =>
+                  setAddHistoryEntryDraft((prev) => ({ ...prev, complaint: e.target.value }))
+                }
+                multiline
+                minRows={3}
+              />
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAddHistoryEntryDialogOpen(false)} disabled={addHistoryEntrySaving}>
+            {t('cancel')}
+          </Button>
+          <Button variant="contained" onClick={saveNewHistoryEntry} disabled={addHistoryEntrySaving}>
+            {addHistoryEntrySaving ? t('saving') : 'Добави'}
+          </Button>
         </DialogActions>
       </Dialog>
 

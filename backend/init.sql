@@ -98,6 +98,8 @@ CREATE TABLE IF NOT EXISTS orders (
     reg_number TEXT NOT NULL,
     complaint TEXT,
     status TEXT DEFAULT 'active',
+    -- Vehicle mileage at the time of service (optional, admin-correctable)
+    odometer_km INTEGER,
     created_at TEXT DEFAULT (datetime('now')),
     completed_at TEXT
 );

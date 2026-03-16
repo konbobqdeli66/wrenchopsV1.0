@@ -337,6 +337,19 @@ router.put('/:id', checkPermission('orders', 'write'), (req, res) => {
         setField('status', v === '' ? null : v);
     }
 
+    // Admin-only: allow correcting odometer km in service history.
+    if (isAdmin && Object.prototype.hasOwnProperty.call(body, 'odometer_km')) {
+        if (body.odometer_km === null || body.odometer_km === undefined || String(body.odometer_km).trim() === '') {
+            setField('odometer_km', null);
+        } else {
+            const parsed = Number(String(body.odometer_km).replace(',', '.'));
+            if (!Number.isFinite(parsed) || parsed < 0) {
+                return res.status(400).json({ error: 'Невалидна стойност за odometer_km' });
+            }
+            setField('odometer_km', Math.round(parsed));
+        }
+    }
+
     // Admin-only: allow correcting timestamps used in service history/invoicing.
     if (isAdmin && Object.prototype.hasOwnProperty.call(body, 'created_at')) {
         if (body.created_at === null) {

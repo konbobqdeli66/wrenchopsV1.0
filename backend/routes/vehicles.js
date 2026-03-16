@@ -5,6 +5,34 @@ const { ciIncludes } = require('../utils/ciText');
 
 const router = express.Router();
 
+const isAdminUser = (req) => String(req.user?.role || '').trim() === 'admin';
+
+const normalizeDateTime = (raw) => {
+  // Accept:
+  // - ISO: 2026-03-16T12:34:56.000Z
+  // - SQLite: 2026-03-16 12:34:56
+  // - Date-only: 2026-03-16
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+
+  let iso = s;
+  const sqliteFull = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/;
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/;
+
+  if (dateOnly.test(s)) {
+    // Treat date-only as UTC midnight to avoid timezone shifts.
+    iso = `${s}T00:00:00Z`;
+  } else if (sqliteFull.test(s)) {
+    const withSeconds = s.length === 16 ? `${s}:00` : s; // YYYY-MM-DD HH:MM -> add :SS
+    iso = `${withSeconds.replace(' ', 'T')}Z`;
+  }
+
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return undefined;
+  // Store in SQLite-compatible UTC format.
+  return d.toISOString().replace('T', ' ').slice(0, 19);
+};
+
 // Get all vehicles with client info
 router.get('/', checkPermission('vehicles', 'read'), (req, res) => {
   const query = `
@@ -196,6 +224,72 @@ router.get('/:id/history', checkPermission('vehicles', 'read'), (req, res) => {
     }
     res.json(rows);
   });
+});
+
+// Admin: create a manual service history entry for a vehicle
+// Body: { service_date: 'YYYY-MM-DD' | ISO | sqlite, odometer_km?: number, complaint?: string }
+router.post('/:id/history', checkPermission('vehicles', 'write'), (req, res) => {
+  if (!isAdminUser(req)) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+
+  const vehicleId = req.params.id;
+  const { service_date, odometer_km, complaint } = req.body || {};
+
+  const dt = normalizeDateTime(service_date);
+  if (dt === undefined || !dt) {
+    return res.status(400).json({ error: 'Невалиден формат за service_date' });
+  }
+
+  const odo =
+    odometer_km === undefined || odometer_km === null || String(odometer_km).trim() === ''
+      ? null
+      : Number(String(odometer_km).replace(',', '.'));
+
+  if (odo !== null && (!Number.isFinite(odo) || odo < 0)) {
+    return res.status(400).json({ error: 'odometer_km must be a non-negative number' });
+  }
+
+  const cleanComplaint = String(complaint ?? '').trim() || 'Ръчно добавен ремонт';
+
+  // Load vehicle + client context
+  db.get(
+    `
+      SELECT v.reg_number, v.client_id, c.name as client_name
+      FROM vehicles v
+      JOIN clients c ON v.client_id = c.id
+      WHERE v.id = ?
+    `,
+    [vehicleId],
+    (getErr, vrow) => {
+      if (getErr) {
+        return res.status(500).json({ error: getErr.message });
+      }
+      if (!vrow?.reg_number) {
+        return res.status(404).json({ error: 'Vehicle not found' });
+      }
+
+      // Insert as a completed order so it appears in history.
+      db.run(
+        `
+          INSERT INTO orders (client_id, client_name, reg_number, complaint, status, odometer_km, created_at, completed_at)
+          VALUES (?, ?, ?, ?, 'completed', ?, ?, ?)
+        `,
+        [vrow.client_id || null, vrow.client_name || '', vrow.reg_number, cleanComplaint, odo, dt, dt],
+        function (insErr) {
+          if (insErr) {
+            return res.status(500).json({ error: insErr.message });
+          }
+          db.get('SELECT * FROM orders WHERE id = ?', [this.lastID], (ordErr, orderRow) => {
+            if (ordErr) {
+              return res.status(500).json({ error: ordErr.message });
+            }
+            return res.json(orderRow);
+          });
+        }
+      );
+    }
+  );
 });
 
 module.exports = router;
