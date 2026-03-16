@@ -41,6 +41,27 @@ const padLeft = (num, len) => String(num ?? '').padStart(len, '0');
 
 const FREE_OPS_COMPONENT_TYPE = 'free_ops';
 
+const isAdminUser = (req) => String(req.user?.role || '').trim() === 'admin';
+
+// Completed orders are used as immutable service history (and for invoicing).
+// Only admins are allowed to mutate completed orders (edit/delete/add/remove operations).
+const ensureCanMutateOrder = (orderId, req, res, cb) => {
+    const isAdmin = isAdminUser(req);
+    db.get('SELECT id, status FROM orders WHERE id = ?', [orderId], (err, row) => {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+        if (!row) {
+            return res.status(404).json({ error: 'Поръчката не е намерена.' });
+        }
+        const status = String(row.status || '').trim();
+        if (status !== 'active' && !isAdmin) {
+            return res.status(403).json({ error: 'Само администратор може да редактира/изтрива приключени ремонти (сервизна история).' });
+        }
+        return cb(row);
+    });
+};
+
 // Всички активни поръчки
 router.get('/', checkPermission('orders', 'read'), (req, res) => {
     db.all(
@@ -263,7 +284,8 @@ router.put('/:id', checkPermission('orders', 'write'), (req, res) => {
     const { id } = req.params;
     const body = req.body || {};
 
-    const isAdmin = String(req.user?.role || '').trim() === 'admin';
+    return ensureCanMutateOrder(id, req, res, () => {
+    const isAdmin = isAdminUser(req);
 
     const normalizeDateTime = (raw) => {
         // Accept:
@@ -339,31 +361,32 @@ router.put('/:id', checkPermission('orders', 'write'), (req, res) => {
         }
     }
 
-    if (!updates.length) {
-        return res.status(400).json({ error: 'Няма подадени полета за промяна.' });
-    }
+        if (!updates.length) {
+            return res.status(400).json({ error: 'Няма подадени полета за промяна.' });
+        }
 
-    db.run(
-        `UPDATE orders SET ${updates.join(', ')} WHERE id = ?`,
-        [...params, id],
-        function (err) {
-            if (err) {
-                res.status(500).json({ error: err.message });
-                return;
-            }
-            if (this.changes === 0) {
-                res.status(404).json({ error: 'Поръчката не е намерена.' });
-                return;
-            }
-            db.get('SELECT * FROM orders WHERE id = ?', [id], (err, row) => {
+        db.run(
+            `UPDATE orders SET ${updates.join(', ')} WHERE id = ?`,
+            [...params, id],
+            function (err) {
                 if (err) {
                     res.status(500).json({ error: err.message });
                     return;
                 }
-                res.json(row);
-            });
-        }
-    );
+                if (this.changes === 0) {
+                    res.status(404).json({ error: 'Поръчката не е намерена.' });
+                    return;
+                }
+                db.get('SELECT * FROM orders WHERE id = ?', [id], (err, row) => {
+                    if (err) {
+                        res.status(500).json({ error: err.message });
+                        return;
+                    }
+                    res.json(row);
+                });
+            }
+        );
+    });
 });
 
 // Приключване (затваряне) на поръчка
@@ -1064,12 +1087,15 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
 
 // Изтриване на поръчка
 router.delete('/:id', checkPermission('orders', 'delete'), (req, res) => {
-    db.run('DELETE FROM orders WHERE id = ?', [req.params.id], function(err) {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
-        }
-        res.json({ message: 'Поръчката е изтрита.' });
+    const orderId = req.params.id;
+    return ensureCanMutateOrder(orderId, req, res, () => {
+        db.run('DELETE FROM orders WHERE id = ?', [orderId], function(err) {
+            if (err) {
+                res.status(500).json({ error: err.message });
+                return;
+            }
+            res.json({ message: 'Поръчката е изтрита.' });
+        });
     });
 });
 
@@ -1199,34 +1225,37 @@ router.post('/:orderId/worktimes', checkPermission('orders', 'write'), (req, res
         );
     };
 
-    // Enforce per-group access for adding worktimes.
-    // UI hides forbidden groups, but backend must enforce too.
-    db.get('SELECT component_type, vehicle_type FROM worktimes WHERE id = ?', [worktime_id], async (wtErr, wtRow) => {
-        if (wtErr) {
-            return res.status(500).json({ error: wtErr.message });
-        }
-        if (!wtRow) {
-            return res.status(400).json({ error: 'Невалидно worktime_id' });
-        }
-
-        const isFreeOps = String(wtRow?.component_type || '').trim() === FREE_OPS_COMPONENT_TYPE;
-
-        if (String(req.user?.role || '').trim() !== 'admin') {
-            const groupPermsMap = await loadWorktimesGroupPermissionsMap(db, req.user?.id);
-            const vt = String(wtRow?.vehicle_type || '').trim().toLowerCase() === 'trailer' ? 'trailer' : 'truck';
-            const catKey = mapComponentTypeToCategoryKey(vt, wtRow?.component_type);
-            const ok = canAccessWorktimesGroup({
-                user: req.user,
-                groupPermsMap,
-                vehicleType: vt,
-                categoryKey: catKey,
-            });
-            if (!ok) {
-                return res.status(403).json({ error: 'Нямате достъп до тази група нормовремена.' });
+    // Completed orders (history) are admin-only for mutations.
+    return ensureCanMutateOrder(orderId, req, res, () => {
+        // Enforce per-group access for adding worktimes.
+        // UI hides forbidden groups, but backend must enforce too.
+        db.get('SELECT component_type, vehicle_type FROM worktimes WHERE id = ?', [worktime_id], async (wtErr, wtRow) => {
+            if (wtErr) {
+                return res.status(500).json({ error: wtErr.message });
             }
-        }
+            if (!wtRow) {
+                return res.status(400).json({ error: 'Невалидно worktime_id' });
+            }
 
-        return continueAdd({ isFreeOps });
+            const isFreeOps = String(wtRow?.component_type || '').trim() === FREE_OPS_COMPONENT_TYPE;
+
+            if (!isAdminUser(req)) {
+                const groupPermsMap = await loadWorktimesGroupPermissionsMap(db, req.user?.id);
+                const vt = String(wtRow?.vehicle_type || '').trim().toLowerCase() === 'trailer' ? 'trailer' : 'truck';
+                const catKey = mapComponentTypeToCategoryKey(vt, wtRow?.component_type);
+                const ok = canAccessWorktimesGroup({
+                    user: req.user,
+                    groupPermsMap,
+                    vehicleType: vt,
+                    categoryKey: catKey,
+                });
+                if (!ok) {
+                    return res.status(403).json({ error: 'Нямате достъп до тази група нормовремена.' });
+                }
+            }
+
+            return continueAdd({ isFreeOps });
+        });
     });
 });
 
@@ -1254,6 +1283,8 @@ router.put('/:orderId/worktimes/:worktimeId', checkPermission('orders', 'write')
     const { orderId, worktimeId } = req.params;
     const { notes, quantity, unit_price_bgn } = req.body;
 
+    return ensureCanMutateOrder(orderId, req, res, () => {
+
     const qty = quantity === undefined || quantity === null ? null : Math.max(1, parseInt(quantity, 10) || 1);
 
     const parsedUnitPrice =
@@ -1265,45 +1296,69 @@ router.put('/:orderId/worktimes/:worktimeId', checkPermission('orders', 'write')
         return res.status(400).json({ error: 'unit_price_bgn must be a non-negative number' });
     }
 
-    db.run(
-        'UPDATE order_worktimes SET notes = COALESCE(?, notes), quantity = COALESCE(?, quantity), unit_price_bgn = COALESCE(?, unit_price_bgn) WHERE order_id = ? AND id = ?',
-        [notes === undefined ? null : (notes || ''), qty, parsedUnitPrice, orderId, worktimeId],
-        function(err) {
-            if (err) {
-                res.status(500).json({ error: err.message });
-                return;
-            }
-            if (this.changes === 0) {
-                res.status(404).json({ error: 'Нормовремето не е намерено в тази поръчка.' });
-                return;
-            }
-            db.get(`
-                SELECT ow.*, w.title as worktime_title, w.hours, w.component_type
-                FROM order_worktimes ow
-                JOIN worktimes w ON ow.worktime_id = w.id
-                WHERE ow.id = ? AND ow.order_id = ?
-            `, [worktimeId, orderId], (err, row) => {
+        db.run(
+            'UPDATE order_worktimes SET notes = COALESCE(?, notes), quantity = COALESCE(?, quantity), unit_price_bgn = COALESCE(?, unit_price_bgn) WHERE order_id = ? AND id = ?',
+            [notes === undefined ? null : (notes || ''), qty, parsedUnitPrice, orderId, worktimeId],
+            function(err) {
                 if (err) {
                     res.status(500).json({ error: err.message });
                     return;
                 }
-                res.json(row);
-            });
-        }
-    );
+                if (this.changes === 0) {
+                    res.status(404).json({ error: 'Нормовремето не е намерено в тази поръчка.' });
+                    return;
+                }
+                db.get(`
+                    SELECT ow.*, w.title as worktime_title, w.hours, w.component_type
+                    FROM order_worktimes ow
+                    JOIN worktimes w ON ow.worktime_id = w.id
+                    WHERE ow.id = ? AND ow.order_id = ?
+                `, [worktimeId, orderId], (err, row) => {
+                    if (err) {
+                        res.status(500).json({ error: err.message });
+                        return;
+                    }
+                    res.json(row);
+                });
+            }
+        );
+    });
 });
 
 // Изтриване на нормовреме от поръчка
 router.delete('/worktimes/:orderWorktimeId', checkPermission('orders', 'delete'), (req, res) => {
     const { orderWorktimeId } = req.params;
 
-    db.run('DELETE FROM order_worktimes WHERE id = ?', [orderWorktimeId], function(err) {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
+    // Need the parent order status to decide if this is service history.
+    db.get(
+        `
+          SELECT ow.order_id as order_id, o.status as status
+          FROM order_worktimes ow
+          JOIN orders o ON o.id = ow.order_id
+          WHERE ow.id = ?
+        `,
+        [orderWorktimeId],
+        (getErr, row) => {
+            if (getErr) {
+                return res.status(500).json({ error: getErr.message });
+            }
+            if (!row?.order_id) {
+                return res.status(404).json({ error: 'Нормовремето не е намерено.' });
+            }
+            const status = String(row.status || '').trim();
+            if (status !== 'active' && !isAdminUser(req)) {
+                return res.status(403).json({ error: 'Само администратор може да редактира приключени ремонти (сервизна история).' });
+            }
+
+            db.run('DELETE FROM order_worktimes WHERE id = ?', [orderWorktimeId], function(err) {
+                if (err) {
+                    res.status(500).json({ error: err.message });
+                    return;
+                }
+                res.json({ message: 'Нормовремето е премахнато от поръчката.' });
+            });
         }
-        res.json({ message: 'Нормовремето е премахнато от поръчката.' });
-    });
+    );
 });
 
 module.exports = router;
