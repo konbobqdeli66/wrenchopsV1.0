@@ -91,6 +91,20 @@ CREATE TABLE IF NOT EXISTS vehicles (
     FOREIGN KEY (client_id) REFERENCES clients (id) ON DELETE CASCADE
 );
 
+-- Public (no-login) client portal links (magic links)
+-- Allows customers to view/manage ONLY their own vehicles/trailers via a shared token.
+CREATE TABLE IF NOT EXISTS client_portal_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    token TEXT UNIQUE NOT NULL,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    revoked_at TEXT,
+    last_used_at TEXT,
+    FOREIGN KEY (client_id) REFERENCES clients (id) ON DELETE CASCADE,
+    UNIQUE (client_id)
+);
+
 CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     client_id INTEGER,

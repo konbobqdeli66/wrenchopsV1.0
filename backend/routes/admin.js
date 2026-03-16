@@ -527,6 +527,129 @@ router.post('/password-reset-links', requireAdmin, async (req, res) => {
   }
 });
 
+// --- Client portal (magic links) ---
+
+const makeClientPortalUrl = async ({ db, req, token }) => {
+  // Prefer company_settings.public_app_url if set; fallback to current host mapping.
+  const publicAppUrl = await new Promise((resolve) => {
+    db.get('SELECT public_app_url FROM company_settings WHERE id = 1', [], (err, row) => {
+      if (err) return resolve('');
+      return resolve(normalizePublicAppUrl(row?.public_app_url));
+    });
+  });
+
+  const fallbackHost = req.get('host').replace(':5000', ':3000');
+  const fallbackBase = `${req.protocol}://${fallbackHost}`;
+  const baseUrl = publicAppUrl || fallbackBase;
+  return `${baseUrl}/client-portal?token=${token}`;
+};
+
+// Get portal link for a client
+router.get('/client-portal-links/:clientId', requireAdmin, (req, res) => {
+  const db = req.app.get('db');
+  const clientId = Number(req.params.clientId);
+  if (!Number.isFinite(clientId) || clientId <= 0) {
+    return res.status(400).json({ error: 'Invalid clientId' });
+  }
+
+  db.get(
+    `
+      SELECT
+        l.id,
+        l.client_id,
+        l.token,
+        l.is_active,
+        l.created_at,
+        l.revoked_at,
+        l.last_used_at,
+        c.name as client_name
+      FROM client_portal_links l
+      JOIN clients c ON c.id = l.client_id
+      WHERE l.client_id = ?
+      LIMIT 1
+    `,
+    [clientId],
+    async (err, row) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (!row) return res.json(null);
+      const url = await makeClientPortalUrl({ db, req, token: row.token });
+      return res.json({ ...row, url });
+    }
+  );
+});
+
+// Create or regenerate portal link for a client
+// Body: { client_id: number }
+router.post('/client-portal-links', requireAdmin, async (req, res) => {
+  const db = req.app.get('db');
+  const clientId = Number(req.body?.client_id);
+  if (!Number.isFinite(clientId) || clientId <= 0) {
+    return res.status(400).json({ error: 'client_id is required' });
+  }
+
+  // Ensure client exists
+  const client = await new Promise((resolve, reject) => {
+    db.get('SELECT id, name FROM clients WHERE id = ?', [clientId], (err, row) => {
+      if (err) return reject(err);
+      resolve(row || null);
+    });
+  }).catch((e) => {
+    return res.status(500).json({ error: e.message });
+  });
+  if (!client) {
+    return res.status(404).json({ error: 'Client not found' });
+  }
+
+  const token = crypto.randomBytes(32).toString('hex');
+
+  db.run(
+    `
+      INSERT INTO client_portal_links (client_id, token, is_active, created_at, revoked_at)
+      VALUES (?, ?, 1, datetime('now'), NULL)
+      ON CONFLICT(client_id) DO UPDATE SET
+        token = excluded.token,
+        is_active = 1,
+        created_at = datetime('now'),
+        revoked_at = NULL
+    `,
+    [clientId, token],
+    async (insErr) => {
+      if (insErr) return res.status(500).json({ error: insErr.message });
+      const url = await makeClientPortalUrl({ db, req, token });
+      return res.json({
+        client_id: clientId,
+        client_name: client.name,
+        token,
+        is_active: 1,
+        url,
+      });
+    }
+  );
+});
+
+// Revoke (deactivate) portal link for a client
+router.put('/client-portal-links/:clientId/revoke', requireAdmin, (req, res) => {
+  const db = req.app.get('db');
+  const clientId = Number(req.params.clientId);
+  if (!Number.isFinite(clientId) || clientId <= 0) {
+    return res.status(400).json({ error: 'Invalid clientId' });
+  }
+
+  db.run(
+    `
+      UPDATE client_portal_links
+      SET is_active = 0, revoked_at = datetime('now')
+      WHERE client_id = ?
+    `,
+    [clientId],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      if (this.changes === 0) return res.status(404).json({ error: 'Link not found' });
+      return res.json({ success: true });
+    }
+  );
+});
+
 // Get all invitations
 router.get('/invitations', requireAdmin, (req, res) => {
   const db = req.app.get('db');

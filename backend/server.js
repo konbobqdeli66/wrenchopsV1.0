@@ -22,6 +22,7 @@ const preferencesRoutes = require("./routes/preferences");
 const vehiclesRoutes = require("./routes/vehicles");
 const adminRoutes = require("./routes/admin");
 const passwordRecoveryRoutes = require("./routes/passwordRecovery");
+const clientPortalRoutes = require('./routes/clientPortal');
 const db = require("./db");
 
 const app = express();
@@ -214,6 +215,8 @@ app.use("/worktimes", worktimesRoutes);
 app.use("/preferences", preferencesRoutes);
 app.use("/vehicles", vehiclesRoutes);
 app.use("/admin", adminRoutes);
+// Public (no-login) customer portal via magic link tokens
+app.use('/client-portal', clientPortalRoutes);
 
 // Ensure every user has a permissions row per module.
 // IMPORTANT: This must NOT override admin-managed permissions.
@@ -487,6 +490,29 @@ const ensureCompanySettings = (callback) => {
   })();
 };
 
+// Ensure client portal links table exists for existing DBs.
+const ensureClientPortalLinks = (callback) => {
+  const sql = `
+    CREATE TABLE IF NOT EXISTS client_portal_links (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      client_id INTEGER NOT NULL,
+      token TEXT UNIQUE NOT NULL,
+      is_active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now')),
+      revoked_at TEXT,
+      last_used_at TEXT,
+      FOREIGN KEY (client_id) REFERENCES clients (id) ON DELETE CASCADE,
+      UNIQUE (client_id)
+    );
+  `;
+  db.exec(sql, (err) => {
+    if (err) {
+      console.warn('Could not ensure client_portal_links table:', err?.message || String(err));
+    }
+    callback?.();
+  });
+};
+
 const startServer = () => {
   const port = Number(process.env.PORT || 5000);
   app.listen(port, '0.0.0.0', () => console.log(`Server running on port ${port}`));
@@ -503,10 +529,12 @@ db.exec(initSQL, (err) => {
 
   // Ensure branding/settings tables exist BEFORE accepting requests.
   ensureCompanySettings(() => {
+    ensureClientPortalLinks(() => {
     ensureBootstrapAdminUser(() => {
       // Apply permissions backfill after base schema is ensured.
       ensureDefaultPermissionsForAllUsers();
       startServer();
+    });
     });
   });
 });

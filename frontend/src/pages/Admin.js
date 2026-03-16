@@ -75,6 +75,13 @@ export default function Admin({ t }) {
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [newResetLink, setNewResetLink] = useState(null);
 
+  // Client portal links (magic links)
+  const [portalClients, setPortalClients] = useState([]);
+  const [portalClientId, setPortalClientId] = useState('');
+  const [portalLink, setPortalLink] = useState(null);
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [portalError, setPortalError] = useState('');
+
   const [companySettings, setCompanySettings] = useState({
     app_brand_name: 'Truck Service',
     app_tagline_short: '',
@@ -201,8 +208,70 @@ export default function Admin({ t }) {
     loadUsers();
     loadInvitations();
     loadCompanySettings();
+    loadPortalClients();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function loadPortalClients() {
+    try {
+      // Admin has access; interceptor attaches token.
+      const res = await axios.get(`${getApiBaseUrl()}/clients`);
+      setPortalClients(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setPortalClients([]);
+    }
+  }
+
+  const loadPortalLinkForClient = async (clientId) => {
+    const id = Number(clientId);
+    if (!Number.isFinite(id) || id <= 0) return;
+    setPortalLoading(true);
+    setPortalError('');
+    try {
+      const res = await axios.get(`${getApiBaseUrl()}/admin/client-portal-links/${id}`);
+      setPortalLink(res.data || null);
+    } catch (e) {
+      setPortalLink(null);
+      setPortalError(e?.response?.data?.error || 'Грешка при зареждане на линка.');
+    } finally {
+      setPortalLoading(false);
+    }
+  };
+
+  const generatePortalLinkForClient = async (clientId) => {
+    const id = Number(clientId);
+    if (!Number.isFinite(id) || id <= 0) {
+      setPortalError('Моля изберете клиент.');
+      return;
+    }
+    setPortalLoading(true);
+    setPortalError('');
+    try {
+      const res = await axios.post(`${getApiBaseUrl()}/admin/client-portal-links`, { client_id: id });
+      setPortalLink(res.data || null);
+    } catch (e) {
+      setPortalLink(null);
+      setPortalError(e?.response?.data?.error || 'Грешка при генериране на линка.');
+    } finally {
+      setPortalLoading(false);
+    }
+  };
+
+  const revokePortalLinkForClient = async (clientId) => {
+    const id = Number(clientId);
+    if (!Number.isFinite(id) || id <= 0) return;
+    if (!window.confirm('Да се деактивира ли клиентският линк?')) return;
+    setPortalLoading(true);
+    setPortalError('');
+    try {
+      await axios.put(`${getApiBaseUrl()}/admin/client-portal-links/${id}/revoke`);
+      await loadPortalLinkForClient(id);
+    } catch (e) {
+      setPortalError(e?.response?.data?.error || 'Грешка при деактивиране.');
+    } finally {
+      setPortalLoading(false);
+    }
+  };
 
   async function loadCompanySettings() {
     try {
@@ -1446,6 +1515,125 @@ export default function Admin({ t }) {
               Генерирай линк
             </Button>
           </Box>
+        </CardContent>
+      </Card>
+
+      {/* Client portal links (magic links) */}
+      <Card sx={{ mt: 4 }}>
+        <CardContent>
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Клиентски линкове (портал без логин)
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Генерирате уникален линк за избран клиент. При отваряне клиентът вижда <strong>само</strong> своите автомобили/ремаркета и може да редактира Рег. № и VIN и да добавя нови.
+            </Typography>
+          </Box>
+
+          {portalError ? (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {portalError}
+            </Alert>
+          ) : null}
+
+          <Grid container spacing={2} alignItems="center">
+            <Grid item xs={12} md={6}>
+              <FormControl fullWidth size="small">
+                <InputLabel id="portal-client-label">Клиент</InputLabel>
+                <Select
+                  labelId="portal-client-label"
+                  label="Клиент"
+                  value={portalClientId}
+                  onChange={async (e) => {
+                    const v = e.target.value;
+                    setPortalClientId(v);
+                    setPortalLink(null);
+                    if (v) await loadPortalLinkForClient(v);
+                  }}
+                >
+                  <MenuItem value="">
+                    <em>Изберете клиент…</em>
+                  </MenuItem>
+                  {portalClients.map((c) => (
+                    <MenuItem key={c.id} value={String(c.id)}>
+                      {c.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+
+            <Grid item xs={12} md={6}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} useFlexGap flexWrap="wrap">
+                <Button
+                  variant="contained"
+                  startIcon={<LinkIcon />}
+                  disabled={portalLoading || !portalClientId}
+                  onClick={() => generatePortalLinkForClient(portalClientId)}
+                >
+                  Генерирай / Регенерирай
+                </Button>
+                <Button
+                  variant="outlined"
+                  startIcon={<LinkIcon />}
+                  disabled={portalLoading || !portalClientId}
+                  onClick={() => loadPortalLinkForClient(portalClientId)}
+                >
+                  Зареди
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  disabled={portalLoading || !portalClientId}
+                  onClick={() => revokePortalLinkForClient(portalClientId)}
+                >
+                  Деактивирай
+                </Button>
+              </Stack>
+            </Grid>
+
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Клиентски линк"
+                value={portalLink?.url || ''}
+                placeholder="Няма генериран линк за този клиент."
+                InputProps={{
+                  readOnly: true,
+                  endAdornment: (
+                    <IconButton
+                      aria-label="copy client portal link"
+                      onClick={() => portalLink?.url && copyToClipboard(portalLink.url)}
+                      disabled={!portalLink?.url}
+                      size="small"
+                    >
+                      <ContentCopyIcon fontSize="small" />
+                    </IconButton>
+                  ),
+                }}
+              />
+            </Grid>
+
+            <Grid item xs={12}>
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+                <Chip
+                  label={portalLink ? (Number(portalLink.is_active) === 1 ? 'Активен' : 'Деактивиран') : 'Няма линк'}
+                  color={portalLink ? (Number(portalLink.is_active) === 1 ? 'success' : 'default') : 'default'}
+                  variant="outlined"
+                  size="small"
+                />
+                {portalLink?.created_at ? (
+                  <Chip label={`Създаден: ${String(portalLink.created_at).slice(0, 19)}`} size="small" variant="outlined" />
+                ) : null}
+                {portalLink?.last_used_at ? (
+                  <Chip label={`Последно отваряне: ${String(portalLink.last_used_at).slice(0, 19)}`} size="small" variant="outlined" />
+                ) : null}
+                {portalLink?.revoked_at ? (
+                  <Chip label={`Деактивиран: ${String(portalLink.revoked_at).slice(0, 19)}`} size="small" variant="outlined" />
+                ) : null}
+              </Box>
+            </Grid>
+          </Grid>
         </CardContent>
       </Card>
 

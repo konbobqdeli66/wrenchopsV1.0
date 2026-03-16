@@ -39,6 +39,7 @@ import Worktimes from "./pages/Worktimes";
 import Vehicles from "./pages/Vehicles";
 import Admin from "./pages/Admin";
 import Invoices from "./pages/Invoices";
+import ClientPortal from "./pages/ClientPortal";
 
 import { t as translate, LANGUAGES } from "./i18n";
 
@@ -1182,6 +1183,9 @@ function App() {
 
         {/* RESET PASSWORD */}
         <Route path="/reset-password" element={<ResetPassword />} />
+
+        {/* PUBLIC (no-login) client portal via magic link */}
+        <Route path="/client-portal" element={<ClientPortal />} />
 
         {/* Защитена зона */}
         <Route path="/" element={token ? <MainApp /> : <Navigate to="/login" />} />
