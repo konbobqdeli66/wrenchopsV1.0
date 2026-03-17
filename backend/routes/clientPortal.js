@@ -134,6 +134,16 @@ router.get('/orders/:orderId/worktimes', (req, res) => {
     if (!link) return res.status(401).json({ error: 'Невалиден линк.' });
     if (link.inactive) return res.status(403).json({ error: 'Линкът е деактивиран.' });
 
+    // Hourly rate is configured in Admin -> Company settings.
+    // We use it to convert "Свободни Операции" (free_ops) prices into equivalent labor hours:
+    // hours = unit_price_bgn / hourly_rate.
+    db.get(
+      'SELECT hourly_rate FROM company_settings WHERE id = 1',
+      [],
+      (rateErr, rateRow) => {
+        // Safe fallback if the table is missing / not initialized yet.
+        const hourlyRate = rateErr ? 100 : (Number(rateRow?.hourly_rate) || 100);
+
     db.get(
       `
         SELECT o.id, o.reg_number
@@ -181,11 +191,34 @@ router.get('/orders/:orderId/worktimes', (req, res) => {
               [orderId],
               (wtErr, rows) => {
                 if (wtErr) return res.status(500).json({ error: wtErr.message });
-                return res.json(rows || []);
+
+                const safeRate = Math.max(0, Number(hourlyRate) || 0);
+                const mapped = (rows || []).map((r) => {
+                  const component = String(r?.component_type || '').trim();
+                  const isFreeOps = component === 'free_ops';
+                  const qty = Number(r?.quantity) || 0;
+                  const baseHoursPerUnit = Number(r?.hours) || 0;
+                  const unitPrice = Number(r?.unit_price_bgn) || 0;
+
+                  const effectiveHoursPerUnit = isFreeOps
+                    ? (safeRate > 0 ? unitPrice / safeRate : 0)
+                    : baseHoursPerUnit;
+                  const effectiveTotalHours = effectiveHoursPerUnit * qty;
+
+                  return {
+                    ...r,
+                    effective_hours_per_unit: effectiveHoursPerUnit,
+                    effective_total_hours: effectiveTotalHours,
+                  };
+                });
+
+                return res.json(mapped);
               }
             );
           }
         );
+      }
+    );
       }
     );
   });

@@ -531,11 +531,22 @@ export default function ClientPortal() {
                       />
                     </Box>
                     <Box sx={{ mt: 0.75, display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
-                      <Chip label={`${Number(w.hours || 0).toFixed(2).replace(/\.00$/, '')} ч`} size="small" />
+                      <Chip
+                        label={`${Number(
+                          (String(w.component_type || '').trim() === 'free_ops'
+                            ? (w.effective_hours_per_unit ?? 0)
+                            : (w.hours ?? 0))
+                        )
+                          .toFixed(2)
+                          .replace(/\.00$/, '')} ч`}
+                        size="small"
+                      />
                       <Chip label={String(w.component_type || '')} size="small" variant="outlined" />
                       {String(w.component_type || '').trim() === 'free_ops' ? (
                         <Chip
-                          label={`Цена: ${(Number(w.unit_price_bgn) || 0).toFixed(2)} лв`}
+                          label={`Труд: ${Number(w.effective_total_hours ?? 0)
+                            .toFixed(2)
+                            .replace(/\.00$/, '')} ч`}
                           size="small"
                           color="success"
                           variant="outlined"
