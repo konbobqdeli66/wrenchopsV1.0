@@ -67,11 +67,20 @@ export default function Vehicles({ t, setPage, userRole }) {
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [itemsPerPage, setItemsPerPage] = useState(25);
 
-  // Admin: edit vehicle identity (reg_number + VIN)
+  // Admin: edit vehicle fields (identity + meta)
   const [editVehicleDialogOpen, setEditVehicleDialogOpen] = useState(false);
   const [editVehicleSaving, setEditVehicleSaving] = useState(false);
   const [editVehicleTarget, setEditVehicleTarget] = useState(null);
-  const [editVehicleDraft, setEditVehicleDraft] = useState({ reg_number: '', vin: '' });
+  const [editVehicleDraft, setEditVehicleDraft] = useState({
+    reg_number: '',
+    vin: '',
+    brand: '',
+    model: '',
+    vehicle_type: 'truck',
+    year: '',
+    gear_box: '',
+    axes: '',
+  });
 
   const [orderDetailsDialogOpen, setOrderDetailsDialogOpen] = useState(false);
   const [selectedHistoryOrder, setSelectedHistoryOrder] = useState(null);
@@ -149,11 +158,23 @@ export default function Vehicles({ t, setPage, userRole }) {
     setEditVehicleDraft({
       reg_number: normalize(vehicle.reg_number),
       vin: normalize(vehicle.vin),
+      brand: normalize(vehicle.brand),
+      model: normalize(vehicle.model),
+      vehicle_type: String(vehicle.vehicle_type || '').trim().toLowerCase() === 'trailer' ? 'trailer' : 'truck',
+      year:
+        vehicle?.year === null || vehicle?.year === undefined || vehicle?.year === ''
+          ? ''
+          : String(vehicle.year),
+      gear_box: normalize(vehicle.gear_box),
+      axes:
+        vehicle?.axes === null || vehicle?.axes === undefined || vehicle?.axes === ''
+          ? ''
+          : String(vehicle.axes),
     });
     setEditVehicleDialogOpen(true);
   };
 
-  const saveVehicleIdentity = async () => {
+  const saveVehicleEdits = async () => {
     if (!isAdmin) return;
     if (!editVehicleTarget?.id) return;
 
@@ -164,11 +185,39 @@ export default function Vehicles({ t, setPage, userRole }) {
       return;
     }
 
+    const vt = String(editVehicleDraft.vehicle_type || '').trim().toLowerCase() === 'trailer' ? 'trailer' : 'truck';
+    const brand = normalize(editVehicleDraft.brand);
+    const model = normalize(editVehicleDraft.model);
+
+    const yearRaw = String(editVehicleDraft.year || '').trim();
+    const year = yearRaw ? Number(yearRaw) : null;
+    if (year !== null && (!Number.isFinite(year) || year < 0)) {
+      alert('Моля въведете валидна година (>= 0).');
+      return;
+    }
+
+    const axesRaw = String(editVehicleDraft.axes || '').trim();
+    const axes = axesRaw ? Number(axesRaw) : null;
+    if (axes !== null && (!Number.isFinite(axes) || axes < 0)) {
+      alert('Моля въведете валиден брой оси (>= 0).');
+      return;
+    }
+
+    // Clear irrelevant fields when switching type
+    const gearBoxPayload = vt === 'truck' ? normalize(editVehicleDraft.gear_box) : null;
+    const axesPayload = vt === 'trailer' ? (axes === null ? null : Math.round(axes)) : null;
+
     try {
       setEditVehicleSaving(true);
       const res = await axios.put(`${getApiBaseUrl()}/vehicles/${editVehicleTarget.id}`, {
         reg_number: reg,
         vin,
+        brand,
+        model,
+        vehicle_type: vt,
+        year: year === null ? null : Math.round(year),
+        gear_box: gearBoxPayload,
+        axes: axesPayload,
       });
 
       const updated = res?.data || null;
@@ -1014,6 +1063,71 @@ export default function Vehicles({ t, setPage, userRole }) {
                 onChange={(e) => setEditVehicleDraft((p) => ({ ...p, vin: e.target.value }))}
               />
             </Grid>
+
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label={t('brand')}
+                value={editVehicleDraft.brand}
+                onChange={(e) => setEditVehicleDraft((p) => ({ ...p, brand: e.target.value }))}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label={t('model')}
+                value={editVehicleDraft.model}
+                onChange={(e) => setEditVehicleDraft((p) => ({ ...p, model: e.target.value }))}
+              />
+            </Grid>
+
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth>
+                <InputLabel>{t('vehicleType')}</InputLabel>
+                <Select
+                  value={editVehicleDraft.vehicle_type}
+                  onChange={(e) => setEditVehicleDraft((p) => ({ ...p, vehicle_type: e.target.value }))}
+                  label={t('vehicleType')}
+                >
+                  <MenuItem value="truck">{t('truck')}</MenuItem>
+                  <MenuItem value="trailer">{t('trailer')}</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label={t('yearLabel')}
+                type="number"
+                inputProps={{ min: 0, step: 1 }}
+                value={editVehicleDraft.year}
+                onChange={(e) => setEditVehicleDraft((p) => ({ ...p, year: e.target.value }))}
+              />
+            </Grid>
+
+            {String(editVehicleDraft.vehicle_type || '').trim() === 'truck' ? (
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label={t('gearBox')}
+                  value={editVehicleDraft.gear_box}
+                  onChange={(e) => setEditVehicleDraft((p) => ({ ...p, gear_box: e.target.value }))}
+                  placeholder={t('gearBoxPlaceholder')}
+                />
+              </Grid>
+            ) : (
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label={t('axesCount')}
+                  type="number"
+                  inputProps={{ min: 0, step: 1 }}
+                  value={editVehicleDraft.axes}
+                  onChange={(e) => setEditVehicleDraft((p) => ({ ...p, axes: e.target.value }))}
+                  placeholder={t('axesPlaceholder')}
+                />
+              </Grid>
+            )}
           </Grid>
           <Alert severity="info" sx={{ mt: 2 }}>
             При промяна на Рег. № системата ще синхронизира и сервизната история за този клиент (поръчките ще бъдат прехвърлени към новия номер).
@@ -1029,7 +1143,7 @@ export default function Vehicles({ t, setPage, userRole }) {
           >
             {t('cancel')}
           </Button>
-          <Button variant="contained" onClick={saveVehicleIdentity} disabled={editVehicleSaving}>
+          <Button variant="contained" onClick={saveVehicleEdits} disabled={editVehicleSaving}>
             {editVehicleSaving ? t('saving') : t('save')}
           </Button>
         </DialogActions>
