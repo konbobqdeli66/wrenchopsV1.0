@@ -34,6 +34,23 @@ import { getApiBaseUrl } from '../api';
 
 const normalize = (v) => String(v ?? '').trim();
 
+const fmtKm = (km) => {
+  if (km === null || km === undefined || km === '') return '—';
+  const n = Number(km);
+  if (!Number.isFinite(n)) return String(km);
+  return n.toLocaleString('bg-BG');
+};
+
+const fmtDt = (sqliteOrIso) => {
+  const s = String(sqliteOrIso || '').trim();
+  if (!s) return '—';
+  // SQLite: YYYY-MM-DD HH:MM:SS
+  const iso = s.includes(' ') ? `${s.replace(' ', 'T')}Z` : s;
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return s;
+  return d.toLocaleString('bg-BG');
+};
+
 const getTokenFromUrl = () => {
   try {
     const p = new URLSearchParams(window.location.search);
@@ -67,6 +84,11 @@ export default function ClientPortal() {
   const [historyVehicle, setHistoryVehicle] = useState(null);
   const [historyRows, setHistoryRows] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsOrder, setDetailsOrder] = useState(null);
+  const [detailsWorktimes, setDetailsWorktimes] = useState([]);
+  const [detailsLoading, setDetailsLoading] = useState(false);
 
   const loadSession = async () => {
     if (!token) {
@@ -185,6 +207,23 @@ export default function ClientPortal() {
       setHistoryRows([]);
     } finally {
       setHistoryLoading(false);
+    }
+  };
+
+  const openHistoryDetails = async (order) => {
+    if (!order?.id) return;
+    setDetailsOrder(order);
+    setDetailsOpen(true);
+    setDetailsLoading(true);
+    try {
+      const res = await axios.get(
+        `${getApiBaseUrl()}/client-portal/orders/${order.id}/worktimes?token=${encodeURIComponent(token)}`
+      );
+      setDetailsWorktimes(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setDetailsWorktimes([]);
+    } finally {
+      setDetailsLoading(false);
     }
   };
 
@@ -409,14 +448,28 @@ export default function ClientPortal() {
                       <Typography sx={{ fontWeight: 900 }}>
                         #{o.id}
                       </Typography>
-                      <Chip label={String(o.status || '') === 'completed' ? 'Приключена' : 'Активна'} size="small" />
+                      <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        <Chip label={String(o.status || '') === 'completed' ? 'Приключена' : 'Активна'} size="small" />
+                        <Chip
+                          label={`Км: ${fmtKm(o.odometer_km)}`}
+                          size="small"
+                          variant="outlined"
+                          sx={{ fontWeight: 800 }}
+                        />
+                      </Box>
                     </Box>
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                      Дата: <strong>{String(o.service_date || o.completed_at || o.created_at || '').slice(0, 19)}</strong>
+                      Дата: <strong>{fmtDt(o.service_date || o.completed_at || o.created_at)}</strong>
                     </Typography>
                     <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>
                       <strong>Ремонт:</strong> {o.complaint || '—'}
                     </Typography>
+
+                    <Box sx={{ mt: 1.25, display: 'flex', justifyContent: 'flex-end' }}>
+                      <Button size="small" variant="outlined" onClick={() => openHistoryDetails(o)}>
+                        Операции
+                      </Button>
+                    </Box>
                   </CardContent>
                 </Card>
               ))}
@@ -431,6 +484,85 @@ export default function ClientPortal() {
             Копирай линка
           </Button>
           <Button onClick={() => setHistoryOpen(false)} variant="contained">
+            Затвори
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* History details: worktimes/operations */}
+      <Dialog
+        open={detailsOpen}
+        onClose={() => {
+          setDetailsOpen(false);
+          setDetailsOrder(null);
+          setDetailsWorktimes([]);
+        }}
+        fullScreen={fullScreenDialog}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <BuildIcon /> Операции – #{detailsOrder?.id || '—'}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.25 }}>
+            Дата: <strong>{fmtDt(detailsOrder?.service_date || detailsOrder?.completed_at || detailsOrder?.created_at)}</strong>
+            {' '}• Км: <strong>{fmtKm(detailsOrder?.odometer_km)}</strong>
+          </Typography>
+
+          {detailsLoading ? (
+            <Typography variant="body2" color="text.secondary">Зареждане...</Typography>
+          ) : detailsWorktimes.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">Няма операции.</Typography>
+          ) : (
+            <Stack spacing={1}>
+              {detailsWorktimes.map((w) => (
+                <Card key={w.id} variant="outlined">
+                  <CardContent>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap' }}>
+                      <Typography sx={{ fontWeight: 900, overflowWrap: 'anywhere' }}>
+                        {w.worktime_title}
+                      </Typography>
+                      <Chip
+                        label={`x${Number(w.quantity || 0)}`}
+                        size="small"
+                        variant="outlined"
+                        sx={{ fontWeight: 900 }}
+                      />
+                    </Box>
+                    <Box sx={{ mt: 0.75, display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
+                      <Chip label={`${Number(w.hours || 0).toFixed(2).replace(/\.00$/, '')} ч`} size="small" />
+                      <Chip label={String(w.component_type || '')} size="small" variant="outlined" />
+                      {String(w.component_type || '').trim() === 'free_ops' ? (
+                        <Chip
+                          label={`Цена: ${(Number(w.unit_price_bgn) || 0).toFixed(2)} лв`}
+                          size="small"
+                          color="success"
+                          variant="outlined"
+                          sx={{ fontWeight: 900 }}
+                        />
+                      ) : null}
+                    </Box>
+                    {w.notes ? (
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75, whiteSpace: 'pre-wrap' }}>
+                        <strong>Бележки:</strong> {w.notes}
+                      </Typography>
+                    ) : null}
+                  </CardContent>
+                </Card>
+              ))}
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setDetailsOpen(false);
+              setDetailsOrder(null);
+              setDetailsWorktimes([]);
+            }}
+            variant="contained"
+          >
             Затвори
           </Button>
         </DialogActions>

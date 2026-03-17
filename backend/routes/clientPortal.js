@@ -118,6 +118,79 @@ router.get('/vehicles/:id/history', (req, res) => {
   });
 });
 
+// Public: operations (worktimes) for a completed order in the service history
+// Scoped by client link token: an order is visible only if its reg_number matches
+// a vehicle owned by the client linked to the token.
+router.get('/orders/:orderId/worktimes', (req, res) => {
+  const token = req.query?.token;
+  const orderId = Number(req.params.orderId);
+
+  if (!Number.isFinite(orderId) || orderId <= 0) {
+    return res.status(400).json({ error: 'Invalid order id' });
+  }
+
+  loadClientByToken(token, (err, link) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!link) return res.status(401).json({ error: 'Невалиден линк.' });
+    if (link.inactive) return res.status(403).json({ error: 'Линкът е деактивиран.' });
+
+    db.get(
+      `
+        SELECT o.id, o.reg_number
+        FROM orders o
+        WHERE o.id = ?
+        LIMIT 1
+      `,
+      [orderId],
+      (oErr, orderRow) => {
+        if (oErr) return res.status(500).json({ error: oErr.message });
+        if (!orderRow) return res.status(404).json({ error: 'Order not found' });
+
+        // Ownership check: order reg_number must match one of the client's vehicles.
+        db.get(
+          `
+            SELECT v.id
+            FROM vehicles v
+            WHERE v.client_id = ?
+              AND UPPER(v.reg_number) = UPPER(?)
+            LIMIT 1
+          `,
+          [link.client_id, orderRow.reg_number],
+          (vErr, vrow) => {
+            if (vErr) return res.status(500).json({ error: vErr.message });
+            if (!vrow) return res.status(403).json({ error: 'Forbidden' });
+
+            db.all(
+              `
+                SELECT
+                  ow.id,
+                  ow.order_id,
+                  ow.worktime_id,
+                  ow.quantity,
+                  ow.unit_price_bgn,
+                  ow.notes,
+                  ow.created_at,
+                  w.title as worktime_title,
+                  w.hours,
+                  w.component_type
+                FROM order_worktimes ow
+                JOIN worktimes w ON w.id = ow.worktime_id
+                WHERE ow.order_id = ?
+                ORDER BY datetime(ow.created_at) ASC, ow.id ASC
+              `,
+              [orderId],
+              (wtErr, rows) => {
+                if (wtErr) return res.status(500).json({ error: wtErr.message });
+                return res.json(rows || []);
+              }
+            );
+          }
+        );
+      }
+    );
+  });
+});
+
 // Public: update reg_number / vin only (scoped by client link)
 router.put('/vehicles/:id', (req, res) => {
   const token = req.query?.token;

@@ -1165,6 +1165,71 @@ function MainApp() {
   );
 }
 
+// Theme wrapper for routes that are accessible without authentication
+// (Login/Register/Forgot/Reset + Client Portal).
+function UnauthShell({ children }) {
+  const prefersDarkMode = useMediaQuery('(prefers-color-scheme: dark)');
+
+  const [darkMode, setDarkMode] = useState(() => {
+    const saved = localStorage.getItem('darkMode');
+    return saved ? JSON.parse(saved) : prefersDarkMode;
+  });
+  const [primaryColor] = useState(() => {
+    const saved = localStorage.getItem('primaryColor');
+    return saved || '#1976d2';
+  });
+  const [appBarGradient] = useState(() => {
+    const saved = localStorage.getItem('appBarGradient');
+    return saved || 'pink';
+  });
+
+  const theme = useMemo(
+    () => createAppTheme(darkMode ? 'dark' : 'light', primaryColor, appBarGradient),
+    [darkMode, primaryColor, appBarGradient]
+  );
+
+  useEffect(() => {
+    localStorage.setItem('darkMode', JSON.stringify(darkMode));
+  }, [darkMode]);
+
+  return (
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <Box
+        sx={{
+          minHeight: '100vh',
+          bgcolor: 'background.default',
+          color: 'text.primary',
+        }}
+      >
+        <IconButton
+          aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+          onClick={() => setDarkMode((p) => !p)}
+          sx={{
+            position: 'fixed',
+            top: 12,
+            right: 12,
+            zIndex: (t) => t.zIndex.modal - 1,
+            bgcolor: (t) => (t.palette.mode === 'dark' ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.90)'),
+            border: (t) => `1px solid ${t.palette.divider}`,
+            boxShadow: (t) =>
+              t.palette.mode === 'dark'
+                ? '0 10px 26px rgba(0,0,0,0.65)'
+                : '0 10px 26px rgba(0,0,0,0.18)',
+            '&:hover': {
+              bgcolor: (t) => (t.palette.mode === 'dark' ? 'rgba(0,0,0,0.60)' : 'rgba(255,255,255,0.98)'),
+            },
+          }}
+        >
+          {darkMode ? <Brightness7Icon /> : <Brightness4Icon />}
+        </IconButton>
+
+        {children}
+      </Box>
+    </ThemeProvider>
+  );
+}
+
 // Основен App Router
 function App() {
   const token = localStorage.getItem("token"); // проверка дали има логнат потребител
@@ -1185,7 +1250,14 @@ function App() {
         <Route path="/reset-password" element={<ResetPassword />} />
 
         {/* PUBLIC (no-login) client portal via magic link */}
-        <Route path="/client-portal" element={<ClientPortal />} />
+        <Route
+          path="/client-portal"
+          element={
+            <UnauthShell>
+              <ClientPortal />
+            </UnauthShell>
+          }
+        />
 
         {/* Защитена зона */}
         <Route path="/" element={token ? <MainApp /> : <Navigate to="/login" />} />
