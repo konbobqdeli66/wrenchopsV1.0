@@ -207,18 +207,135 @@ router.post('/', checkPermission('vehicles', 'write'), (req, res) => {
 
 // Update vehicle
 router.put('/:id', checkPermission('vehicles', 'write'), (req, res) => {
-  const { reg_number, vin, brand, model, vehicle_type, gear_box, axes, year } = req.body;
+  const vehicleId = Number(req.params.id);
+  if (!Number.isFinite(vehicleId) || vehicleId <= 0) {
+    return res.status(400).json({ error: 'Invalid vehicle id' });
+  }
 
-  db.run(
-    'UPDATE vehicles SET reg_number = ?, vin = ?, brand = ?, model = ?, vehicle_type = ?, gear_box = ?, axes = ?, year = ? WHERE id = ?',
-    [reg_number, vin, brand, model, vehicle_type, gear_box, axes, year, req.params.id],
-    function(err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      res.json({ message: 'Vehicle updated successfully' });
+  // NOTE: Keep this route flexible (partial updates) so different UIs can update
+  // only the fields they need.
+  const body = req.body || {};
+
+  const has = (k) => Object.prototype.hasOwnProperty.call(body, k);
+
+  const updates = [];
+  const params = [];
+  const setField = (field, value) => {
+    updates.push(`${field} = ?`);
+    params.push(value);
+  };
+
+  // Validate reg_number if provided
+  if (has('reg_number')) {
+    const v = body.reg_number === null ? null : String(body.reg_number ?? '').trim();
+    if (!v) {
+      return res.status(400).json({ error: 'reg_number е задължително поле' });
     }
-  );
+    if (v.length > 32) {
+      return res.status(400).json({ error: 'reg_number е твърде дълъг' });
+    }
+    setField('reg_number', v);
+  }
+
+  if (has('vin')) {
+    const v = body.vin === null ? null : String(body.vin ?? '').trim();
+    if (v && v.length > 64) {
+      return res.status(400).json({ error: 'vin е твърде дълъг' });
+    }
+    setField('vin', v || null);
+  }
+
+  // Keep compatibility with the older full-form update
+  if (has('brand')) setField('brand', body.brand === null ? null : String(body.brand ?? '').trim() || null);
+  if (has('model')) setField('model', body.model === null ? null : String(body.model ?? '').trim() || null);
+  if (has('vehicle_type')) {
+    const vt = String(body.vehicle_type ?? '').trim().toLowerCase();
+    setField('vehicle_type', vt === 'trailer' ? 'trailer' : 'truck');
+  }
+  if (has('gear_box')) setField('gear_box', body.gear_box === null ? null : String(body.gear_box ?? '').trim() || null);
+  if (has('axes')) {
+    if (body.axes === null || body.axes === undefined || String(body.axes).trim() === '') setField('axes', null);
+    else {
+      const n = Number(body.axes);
+      if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: 'axes must be a non-negative number' });
+      setField('axes', Math.round(n));
+    }
+  }
+  if (has('year')) {
+    if (body.year === null || body.year === undefined || String(body.year).trim() === '') setField('year', null);
+    else {
+      const n = Number(body.year);
+      if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: 'year must be a non-negative number' });
+      setField('year', Math.round(n));
+    }
+  }
+
+  if (!updates.length) {
+    return res.status(400).json({ error: 'Няма подадени полета за промяна.' });
+  }
+
+  // We need the old reg + client context to keep service history consistent if reg_number changes.
+  db.get('SELECT id, client_id, reg_number FROM vehicles WHERE id = ?', [vehicleId], (getErr, oldRow) => {
+    if (getErr) return res.status(500).json({ error: getErr.message });
+    if (!oldRow) return res.status(404).json({ error: 'Vehicle not found' });
+
+    const oldReg = String(oldRow.reg_number || '').trim();
+
+    db.run(
+      `UPDATE vehicles SET ${updates.join(', ')} WHERE id = ?`,
+      [...params, vehicleId],
+      function (updErr) {
+        if (updErr) {
+          return res.status(500).json({ error: updErr.message });
+        }
+        if (this.changes === 0) {
+          return res.status(404).json({ error: 'Vehicle not found' });
+        }
+
+        // If reg_number changed -> update past orders for this client.
+        // This keeps /vehicles/:id/history stable.
+        if (has('reg_number')) {
+          const newReg = String(body.reg_number || '').trim();
+          if (oldReg && newReg && oldReg.toUpperCase() !== newReg.toUpperCase()) {
+            db.run(
+              `
+                UPDATE orders
+                SET reg_number = ?
+                WHERE UPPER(reg_number) = UPPER(?)
+                  AND (
+                    client_id = ?
+                    OR (
+                      client_id IS NULL
+                      AND COALESCE(client_name, '') = (SELECT name FROM clients WHERE id = ?)
+                    )
+                  )
+              `,
+              [newReg, oldReg, oldRow.client_id, oldRow.client_id]
+            );
+          }
+        }
+
+        // Return the updated row with client info (useful for UI updates)
+        const query = `
+          SELECT
+            v.*,
+            c.name as client_name,
+            (
+              SELECT COUNT(1)
+              FROM orders o
+              WHERE UPPER(o.reg_number) = UPPER(v.reg_number)
+            ) as history_count
+          FROM vehicles v
+          JOIN clients c ON v.client_id = c.id
+          WHERE v.id = ?
+        `;
+        db.get(query, [vehicleId], (rowErr, row) => {
+          if (rowErr) return res.status(500).json({ error: rowErr.message });
+          return res.json(row || { message: 'Vehicle updated successfully' });
+        });
+      }
+    );
+  });
 });
 
 // Delete vehicle

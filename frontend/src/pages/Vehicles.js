@@ -30,7 +30,8 @@ import {
   AccordionSummary,
   AccordionDetails,
   useMediaQuery,
-  Tooltip
+  Tooltip,
+  Alert
 } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
 import ClearIcon from "@mui/icons-material/Clear";
@@ -65,6 +66,12 @@ export default function Vehicles({ t, setPage, userRole }) {
   const [serviceHistory, setServiceHistory] = useState([]);
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [itemsPerPage, setItemsPerPage] = useState(25);
+
+  // Admin: edit vehicle identity (reg_number + VIN)
+  const [editVehicleDialogOpen, setEditVehicleDialogOpen] = useState(false);
+  const [editVehicleSaving, setEditVehicleSaving] = useState(false);
+  const [editVehicleTarget, setEditVehicleTarget] = useState(null);
+  const [editVehicleDraft, setEditVehicleDraft] = useState({ reg_number: '', vin: '' });
 
   const [orderDetailsDialogOpen, setOrderDetailsDialogOpen] = useState(false);
   const [selectedHistoryOrder, setSelectedHistoryOrder] = useState(null);
@@ -132,6 +139,66 @@ export default function Vehicles({ t, setPage, userRole }) {
     setServiceHistory(res.data);
     setHistoryDialogOpen(true);
   }
+
+  const normalize = (v) => String(v ?? '').trim();
+
+  const openEditVehicle = (vehicle) => {
+    if (!isAdmin) return;
+    if (!vehicle?.id) return;
+    setEditVehicleTarget(vehicle);
+    setEditVehicleDraft({
+      reg_number: normalize(vehicle.reg_number),
+      vin: normalize(vehicle.vin),
+    });
+    setEditVehicleDialogOpen(true);
+  };
+
+  const saveVehicleIdentity = async () => {
+    if (!isAdmin) return;
+    if (!editVehicleTarget?.id) return;
+
+    const reg = normalize(editVehicleDraft.reg_number);
+    const vin = normalize(editVehicleDraft.vin);
+    if (!reg) {
+      alert('Рег. № е задължително поле.');
+      return;
+    }
+
+    try {
+      setEditVehicleSaving(true);
+      const res = await axios.put(`${getApiBaseUrl()}/vehicles/${editVehicleTarget.id}`, {
+        reg_number: reg,
+        vin,
+      });
+
+      const updated = res?.data || null;
+
+      // Update list
+      setVehicles((prev) =>
+        (prev || []).map((v) => (Number(v?.id) === Number(updated?.id) ? { ...v, ...updated } : v))
+      );
+
+      // Update currently opened vehicle + refresh history (history is keyed by reg_number)
+      if (selectedVehicle?.id && Number(selectedVehicle.id) === Number(updated?.id)) {
+        setSelectedVehicle((prev) => ({ ...(prev || {}), ...(updated || {}) }));
+        if (historyDialogOpen) {
+          try {
+            const h = await axios.get(`${getApiBaseUrl()}/vehicles/${updated.id}/history`);
+            setServiceHistory(Array.isArray(h.data) ? h.data : []);
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      setEditVehicleDialogOpen(false);
+      setEditVehicleTarget(null);
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Грешка при запис на промяната.');
+    } finally {
+      setEditVehicleSaving(false);
+    }
+  };
 
   async function loadHistoryOrderWorktimes(orderId) {
     try {
@@ -650,17 +717,32 @@ export default function Vehicles({ t, setPage, userRole }) {
                         </Box>
                       </TableCell>
                       <TableCell>
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          startIcon={<BuildIcon />}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleVehicleClick(vehicle);
-                          }}
-                        >
-                          {t('history')} ({getHistoryCountLabel(vehicle)})
-                        </Button>
+                        <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                          {isAdmin ? (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              startIcon={<EditIcon />}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openEditVehicle(vehicle);
+                              }}
+                            >
+                              Редакция
+                            </Button>
+                          ) : null}
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            startIcon={<BuildIcon />}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleVehicleClick(vehicle);
+                            }}
+                          >
+                            {t('history')} ({getHistoryCountLabel(vehicle)})
+                          </Button>
+                        </Box>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -724,17 +806,32 @@ export default function Vehicles({ t, setPage, userRole }) {
                         </Box>
 
                         <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            startIcon={<BuildIcon />}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleVehicleClick(vehicle);
-                            }}
-                          >
-                            {t('history')} ({getHistoryCountLabel(vehicle)})
-                          </Button>
+                          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                            {isAdmin ? (
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                startIcon={<EditIcon />}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openEditVehicle(vehicle);
+                                }}
+                              >
+                                Редакция
+                              </Button>
+                            ) : null}
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              startIcon={<BuildIcon />}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleVehicleClick(vehicle);
+                              }}
+                            >
+                              {t('history')} ({getHistoryCountLabel(vehicle)})
+                            </Button>
+                          </Box>
                         </Box>
                       </CardContent>
                     </Card>
@@ -861,11 +958,80 @@ export default function Vehicles({ t, setPage, userRole }) {
         </DialogContent>
         <DialogActions>
           {isAdmin ? (
-            <Button variant="outlined" onClick={openAddHistoryEntry} startIcon={<BuildIcon />}>
-              Добави запис
-            </Button>
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mr: 'auto' }}>
+              <Button
+                variant="outlined"
+                startIcon={<EditIcon />}
+                onClick={() => {
+                  if (selectedVehicle) openEditVehicle(selectedVehicle);
+                }}
+              >
+                Редактирай МПС
+              </Button>
+              <Button variant="outlined" onClick={openAddHistoryEntry} startIcon={<BuildIcon />}>
+                Добави запис
+              </Button>
+            </Box>
           ) : null}
           <Button onClick={() => setHistoryDialogOpen(false)}>{t('close')}</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Admin: edit vehicle reg/VIN */}
+      <Dialog
+        open={editVehicleDialogOpen}
+        onClose={() => {
+          if (editVehicleSaving) return;
+          setEditVehicleDialogOpen(false);
+          setEditVehicleTarget(null);
+        }}
+        maxWidth="sm"
+        fullWidth
+        fullScreen={fullScreenDialog}
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <EditIcon />
+          Редакция на превозно средство
+        </DialogTitle>
+        <DialogContent sx={{ pt: 2 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Собственик: <strong>{editVehicleTarget?.client_name || '—'}</strong>
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Рег. №"
+                value={editVehicleDraft.reg_number}
+                onChange={(e) => setEditVehicleDraft((p) => ({ ...p, reg_number: e.target.value }))}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="VIN"
+                value={editVehicleDraft.vin}
+                onChange={(e) => setEditVehicleDraft((p) => ({ ...p, vin: e.target.value }))}
+              />
+            </Grid>
+          </Grid>
+          <Alert severity="info" sx={{ mt: 2 }}>
+            При промяна на Рег. № системата ще синхронизира и сервизната история за този клиент (поръчките ще бъдат прехвърлени към новия номер).
+          </Alert>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setEditVehicleDialogOpen(false);
+              setEditVehicleTarget(null);
+            }}
+            disabled={editVehicleSaving}
+          >
+            {t('cancel')}
+          </Button>
+          <Button variant="contained" onClick={saveVehicleIdentity} disabled={editVehicleSaving}>
+            {editVehicleSaving ? t('saving') : t('save')}
+          </Button>
         </DialogActions>
       </Dialog>
 
