@@ -45,6 +45,22 @@ const isValidDateOnly = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || '').trim()
 
 const isAdminUser = (req) => String(req.user?.role || '').trim() === 'admin';
 
+// Helpers for bulk invoicing
+const normalizeOrderIds = (raw) => {
+    const arr = Array.isArray(raw) ? raw : [];
+    const ids = arr
+        .map((x) => Number(x))
+        .filter((n) => Number.isFinite(n) && Number.isInteger(n) && n > 0);
+    // De-duplicate but keep stable order
+    return Array.from(new Set(ids));
+};
+
+const makeInClause = (arr) => {
+    const safe = Array.isArray(arr) ? arr : [];
+    if (!safe.length) return { clause: '(NULL)', params: [] };
+    return { clause: `(${safe.map(() => '?').join(',')})`, params: safe };
+};
+
 // Completed orders are used as immutable service history (and for invoicing).
 // Only admins are allowed to mutate completed orders (edit/delete/add/remove operations).
 const ensureCanMutateOrder = (orderId, req, res, cb) => {
@@ -198,6 +214,37 @@ router.get('/documents', checkPermission('orders', 'read'), (req, res) => {
             return res.status(500).json({ error: err.message });
         }
         res.json(rows);
+    });
+});
+
+// Delete a GROUP invoice by invoice_no (bulk/group invoicing).
+// Admin-only safety: even if a non-admin has invoices:delete, group deletions require admin.
+// NOTE: This deletes ONLY order_documents rows (numbers are not reused).
+router.delete('/documents/by-invoice/:invoiceNo', checkPermission('invoices', 'delete'), (req, res) => {
+    const invoiceNo = String(req.params.invoiceNo || '').trim();
+    if (!invoiceNo) {
+        return res.status(400).json({ error: 'Липсва номер на фактура (invoiceNo).' });
+    }
+
+    if (!isAdminUser(req)) {
+        return res.status(403).json({ error: 'Само администратор може да изтрива групови фактури.' });
+    }
+
+    db.all('SELECT order_id FROM order_documents WHERE invoice_no = ?', [invoiceNo], (selErr, rows) => {
+        if (selErr) {
+            return res.status(500).json({ error: selErr.message });
+        }
+        const ids = (rows || []).map((r) => Number(r?.order_id)).filter((n) => Number.isFinite(n));
+        if (!ids.length) {
+            return res.status(404).json({ error: 'Груповата фактура не е намерена.' });
+        }
+
+        db.run('DELETE FROM order_documents WHERE invoice_no = ?', [invoiceNo], function (delErr) {
+            if (delErr) {
+                return res.status(500).json({ error: delErr.message });
+            }
+            return res.json({ success: true, invoice_no: invoiceNo, deleted_orders: ids, deleted_count: this.changes });
+        });
     });
 });
 
@@ -619,6 +666,249 @@ router.post('/:id/documents/reserve', checkPermission('orders', 'write'), (req, 
             );
         });
     });
+});
+
+// Reserve a SINGLE invoice number for MULTIPLE completed orders (bulk/group invoicing).
+// - All orders must be status='completed'
+// - None must be already invoiced (order_documents row must not exist)
+// - All orders must belong to the SAME client (same client_id OR same client_name fallback)
+// - The same invoice_no is assigned to all order_documents rows
+// - Each order gets its own protocol_no
+// Body: { order_ids: number[], issue_date?: 'YYYY-MM-DD', multipliers?: { out_of_hours?: boolean, holiday?: boolean, out_of_service?: boolean } }
+router.post('/documents/reserve-bulk', checkPermission('orders', 'write'), (req, res) => {
+    const orderIds = normalizeOrderIds(req.body?.order_ids);
+    if (orderIds.length < 2) {
+        return res.status(400).json({ error: 'Моля изберете поне 2 поръчки за групово фактуриране.' });
+    }
+
+    const multFlags = req.body?.multipliers || {};
+    const requestedIssueDateRaw = String(req.body?.issue_date || '').trim();
+    if (requestedIssueDateRaw && !isValidDateOnly(requestedIssueDateRaw)) {
+        return res.status(400).json({ error: 'Невалиден формат за дата на фактуриране (използвайте YYYY-MM-DD).' });
+    }
+
+    const { clause: idsClause, params: idsParams } = makeInClause(orderIds);
+
+    // Load orders and validate eligibility
+    db.all(
+        `SELECT id, status, client_id, client_name, reg_number, completed_at, created_at FROM orders WHERE id IN ${idsClause}`,
+        idsParams,
+        (err, orderRows) => {
+            if (err) return res.status(500).json({ error: err.message });
+            const rows = Array.isArray(orderRows) ? orderRows : [];
+            const byId = new Map(rows.map((r) => [Number(r?.id), r]));
+
+            const missingIds = orderIds.filter((id) => !byId.has(id));
+            if (missingIds.length) {
+                return res.status(404).json({ error: `Намерени са липсващи поръчки: ${missingIds.join(', ')}` });
+            }
+
+            const notCompleted = orderIds
+                .map((id) => byId.get(id))
+                .filter((o) => String(o?.status || '').trim() !== 'completed');
+            if (notCompleted.length) {
+                return res.status(400).json({
+                    error: 'Само приключени поръчки могат да се фактурират (групово).',
+                    orders: notCompleted.map((o) => ({ id: o.id, status: o.status })),
+                });
+            }
+
+            // Enforce same client
+            const getClientKey = (o) => {
+                const cid = o?.client_id;
+                if (cid !== null && cid !== undefined && String(cid).trim() !== '') return `id:${cid}`;
+                const name = String(o?.client_name || '').trim();
+                return name ? `name:${name}` : 'unknown';
+            };
+            const clientKeys = new Set(orderIds.map((id) => getClientKey(byId.get(id))));
+            if (clientKeys.size !== 1 || clientKeys.has('unknown')) {
+                return res.status(400).json({
+                    error: 'Групово фактуриране е възможно само за поръчки на един и същ клиент.',
+                });
+            }
+
+            // Ensure none are already invoiced
+            db.all(
+                `SELECT order_id FROM order_documents WHERE order_id IN ${idsClause}`,
+                idsParams,
+                (docErr, docRows) => {
+                    if (docErr) return res.status(500).json({ error: docErr.message });
+                    const invoiced = new Set((docRows || []).map((r) => Number(r?.order_id)));
+                    const already = orderIds.filter((id) => invoiced.has(id));
+                    if (already.length) {
+                        return res.status(400).json({
+                            error: `Някои от избраните поръчки вече са фактурирани: ${already.join(', ')}`,
+                        });
+                    }
+
+                    // Enforce pricing for free_ops items for ALL orders
+                    db.all(
+                        `
+                          SELECT ow.order_id, ow.id as order_worktime_id, ow.quantity, ow.unit_price_bgn, w.title
+                          FROM order_worktimes ow
+                          JOIN worktimes w ON w.id = ow.worktime_id
+                          WHERE ow.order_id IN ${idsClause} AND COALESCE(w.component_type, '') = ?
+                        `,
+                        [...idsParams, FREE_OPS_COMPONENT_TYPE],
+                        (priceErr, freeRows) => {
+                            if (priceErr) return res.status(500).json({ error: priceErr.message });
+                            const missing = (freeRows || []).filter((r) => {
+                                const qty = Number(r?.quantity) || 0;
+                                const price = Number(r?.unit_price_bgn);
+                                return qty > 0 && (!Number.isFinite(price) || price <= 0);
+                            });
+
+                            if (missing.length) {
+                                return res.status(400).json({
+                                    error: 'Липсва цена за една или повече "Свободни Операции". Въведете цена и опитайте отново.',
+                                    missing_free_ops: missing.map((m) => ({
+                                        order_id: m.order_id,
+                                        order_worktime_id: m.order_worktime_id,
+                                        title: m.title,
+                                    })),
+                                });
+                            }
+
+                            // Resolve issue_date fallback: for bulk invoices default to TODAY.
+                            const issueDate = requestedIssueDateRaw || new Date().toISOString().slice(0, 10);
+
+                            db.serialize(() => {
+                                db.run('BEGIN IMMEDIATE TRANSACTION');
+                                db.run('INSERT OR IGNORE INTO company_settings (id) VALUES (1)');
+
+                                db.get(
+                                    `
+                                      SELECT
+                                        invoice_prefix,
+                                        invoice_pad_length,
+                                        invoice_last_number,
+                                        protocol_pad_length,
+                                        protocol_last_number,
+                                        price_multiplier_out_of_hours,
+                                        price_multiplier_holiday,
+                                        price_multiplier_out_of_service
+                                      FROM company_settings
+                                      WHERE id = 1
+                                    `,
+                                    [],
+                                    (setErr, settings) => {
+                                        if (setErr) {
+                                            db.run('ROLLBACK');
+                                            return res.status(500).json({ error: setErr.message });
+                                        }
+
+                                        const invoicePrefix = settings?.invoice_prefix ?? '09';
+                                        const invoicePadLength = Math.max(1, parseInt(settings?.invoice_pad_length, 10) || 8);
+                                        const lastInvoice = parseInt(settings?.invoice_last_number, 10) || 0;
+
+                                        const protocolPadLength = Math.max(1, parseInt(settings?.protocol_pad_length, 10) || 10);
+                                        const lastProtocol = parseInt(settings?.protocol_last_number, 10) || 0;
+
+                                        const mOutOfHours = Number(settings?.price_multiplier_out_of_hours) || 1;
+                                        const mHoliday = Number(settings?.price_multiplier_holiday) || 1;
+                                        const mOutOfService = Number(settings?.price_multiplier_out_of_service) || 1;
+
+                                        const mult_out_of_hours = multFlags?.out_of_hours ? mOutOfHours : 1;
+                                        const mult_holiday = multFlags?.holiday ? mHoliday : 1;
+                                        const mult_out_of_service = multFlags?.out_of_service ? mOutOfService : 1;
+
+                                        const nextInvoice = lastInvoice + 1;
+                                        const nextProtocolLast = lastProtocol + orderIds.length;
+                                        const invoiceNo = `${invoicePrefix}${padLeft(nextInvoice, invoicePadLength)}`;
+
+                                        const protocolStart = lastProtocol + 1;
+                                        const protocolNos = orderIds.map((_, idx) =>
+                                            padLeft(protocolStart + idx, protocolPadLength)
+                                        );
+
+                                        db.run(
+                                            'UPDATE company_settings SET invoice_last_number = ?, protocol_last_number = ? WHERE id = 1',
+                                            [nextInvoice, nextProtocolLast],
+                                            (updErr) => {
+                                                if (updErr) {
+                                                    db.run('ROLLBACK');
+                                                    return res.status(500).json({ error: updErr.message });
+                                                }
+
+                                                const stmt = db.prepare(
+                                                    `
+                                                      INSERT INTO order_documents (
+                                                        order_id,
+                                                        protocol_no,
+                                                        invoice_no,
+                                                        issue_date,
+                                                        mult_out_of_hours,
+                                                        mult_holiday,
+                                                        mult_out_of_service
+                                                      )
+                                                      VALUES (?, ?, ?, ?, ?, ?, ?)
+                                                    `
+                                                );
+
+                                                let failed = false;
+                                                orderIds.forEach((orderId, idx) => {
+                                                    stmt.run(
+                                                        [
+                                                            orderId,
+                                                            protocolNos[idx],
+                                                            invoiceNo,
+                                                            issueDate,
+                                                            mult_out_of_hours,
+                                                            mult_holiday,
+                                                            mult_out_of_service,
+                                                        ],
+                                                        (insErr) => {
+                                                            if (insErr && !failed) {
+                                                                failed = true;
+                                                                try { stmt.finalize(); } catch {}
+                                                                db.run('ROLLBACK');
+                                                                return res.status(500).json({ error: insErr.message });
+                                                            }
+                                                        }
+                                                    );
+                                                });
+
+                                                stmt.finalize((finErr) => {
+                                                    if (finErr) {
+                                                        db.run('ROLLBACK');
+                                                        return res.status(500).json({ error: finErr.message });
+                                                    }
+                                                    if (failed) return;
+
+                                                    db.run('COMMIT', (commitErr) => {
+                                                        if (commitErr) {
+                                                            db.run('ROLLBACK');
+                                                            return res.status(500).json({ error: commitErr.message });
+                                                        }
+
+                                                        // Return inserted docs
+                                                        db.all(
+                                                            `SELECT * FROM order_documents WHERE order_id IN ${idsClause} ORDER BY created_at DESC`,
+                                                            idsParams,
+                                                            (selErr, selRows) => {
+                                                                if (selErr) {
+                                                                    return res.status(500).json({ error: selErr.message });
+                                                                }
+                                                                return res.json({
+                                                                    invoice_no: invoiceNo,
+                                                                    issue_date: issueDate,
+                                                                    docs: selRows || [],
+                                                                });
+                                                            }
+                                                        );
+                                                    });
+                                                });
+                                            }
+                                        );
+                                    }
+                                );
+                            });
+                        }
+                    );
+                }
+            );
+        }
+    );
 });
 
 // Mark an invoiced order as PAID.

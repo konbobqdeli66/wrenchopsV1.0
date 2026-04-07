@@ -27,6 +27,7 @@ import axios from 'axios';
     Select,
     Checkbox,
     FormControlLabel,
+    Switch,
     useMediaQuery,
     Stack,
     ToggleButton,
@@ -42,6 +43,7 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PaidIcon from '@mui/icons-material/Paid';
+import LinkIcon from '@mui/icons-material/Link';
 
 import { getApiBaseUrl } from '../api';
 import { decodeJwtPayload } from '../utils/jwt';
@@ -158,6 +160,35 @@ export default function Invoices({ canDeleteInvoices = false }) {
   const [invoiceEmailTo, setInvoiceEmailTo] = useState('');
   const [sendingInvoiceEmail, setSendingInvoiceEmail] = useState(false);
   const [emailTooltipOpen, setEmailTooltipOpen] = useState(false);
+
+  // Bulk/group invoicing
+  const [bulkEnabled, setBulkEnabled] = useState(false);
+  const [bulkClientKey, setBulkClientKey] = useState('');
+  const [bulkSelectedOrderIds, setBulkSelectedOrderIds] = useState([]);
+  const [bulkPreviewOpen, setBulkPreviewOpen] = useState(false);
+  const [bulkPreviewLoading, setBulkPreviewLoading] = useState(false);
+  const [bulkWorktimesByOrderId, setBulkWorktimesByOrderId] = useState({});
+  const [bulkMissingFreeOps, setBulkMissingFreeOps] = useState([]);
+  // Bulk: draft unit prices for missing free ops (keyed by order_worktime_id)
+  const [bulkFreeOpsPriceDraftByRowId, setBulkFreeOpsPriceDraftByRowId] = useState({});
+  const [bulkFreeOpsSavingRowId, setBulkFreeOpsSavingRowId] = useState(null);
+  const [bulkRecipientDraft, setBulkRecipientDraft] = useState({
+    name: '',
+    eik: '',
+    vat_number: '',
+    city: '',
+    address: '',
+    mol: '',
+  });
+  const [bulkIssueDateDraft, setBulkIssueDateDraft] = useState(new Date().toISOString().slice(0, 10));
+  const [bulkMultOutOfHoursChecked, setBulkMultOutOfHoursChecked] = useState(false);
+  const [bulkMultHolidayChecked, setBulkMultHolidayChecked] = useState(false);
+  const [bulkMultOutOfServiceChecked, setBulkMultOutOfServiceChecked] = useState(false);
+  const [bulkGenerating, setBulkGenerating] = useState(false);
+
+  // Group-invoice focus (filter orders by a shared invoice_no)
+  const [groupFocusInvoiceNo, setGroupFocusInvoiceNo] = useState('');
+  const [groupPreviewLoading, setGroupPreviewLoading] = useState(false);
 
   // Avoid re-rendering the entire Invoices page on every keystroke while typing in the email field.
   // We keep the latest value in a ref, and only sync to state with a small debounce.
@@ -412,6 +443,24 @@ export default function Invoices({ canDeleteInvoices = false }) {
     return orders.filter((o) => !isArchivedLocal(o));
   }, [orders, viewMode, invoicedDocsByOrderId, archiveCutoff]);
 
+  const invoiceGroupMetaByInvoiceNo = useMemo(() => {
+    const docs = Object.values(invoicedDocsByOrderId || {});
+    const map = new Map();
+    docs.forEach((d) => {
+      const inv = String(d?.invoice_no || '').trim();
+      if (!inv) return;
+      const prev = map.get(inv) || { invoice_no: inv, count: 0, order_ids: [] };
+      prev.count += 1;
+      if (d?.order_id != null) prev.order_ids.push(Number(d.order_id));
+      map.set(inv, prev);
+    });
+    // Normalize order_ids
+    map.forEach((v) => {
+      v.order_ids = Array.from(new Set((v.order_ids || []).filter((x) => Number.isFinite(x)))).sort((a, b) => a - b);
+    });
+    return map;
+  }, [invoicedDocsByOrderId]);
+
   const monthTabs = useMemo(() => {
     const isInvoicedLocal = (o) => Boolean(invoicedDocsByOrderId?.[o?.id]);
     const map = new Map();
@@ -510,8 +559,71 @@ export default function Invoices({ canDeleteInvoices = false }) {
       }
     });
 
+    // Optional: focus on a single group invoice (shared invoice_no)
+    const focusInv = String(groupFocusInvoiceNo || '').trim();
+    if (focusInv) {
+      return sorted.filter((o) => String(invoicedDocsByOrderId?.[o?.id]?.invoice_no || '').trim() === focusInv);
+    }
+
     return sorted;
-  }, [baseOrders, search, monthKey, sortMode, invoicedDocsByOrderId]);
+  }, [baseOrders, search, monthKey, sortMode, invoicedDocsByOrderId, groupFocusInvoiceNo]);
+
+  const getClientKeyForOrder = (o) => {
+    if (o?.client_id != null && String(o.client_id).trim() !== '') return `id:${o.client_id}`;
+    const name = String(o?.client_name || '').trim();
+    return name ? `name:${name}` : 'unknown';
+  };
+
+  const bulkEligibleOrders = useMemo(() => {
+    // Bulk invoicing is relevant mostly for NOT invoiced completed orders.
+    const isInv = (o) => Boolean(invoicedDocsByOrderId?.[o?.id]);
+    const monthFiltered =
+      monthKey === 'all'
+        ? baseOrders
+        : baseOrders.filter((o) => {
+            const d = parseOrderDate(o);
+            if (!d) return false;
+            const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            return key === monthKey;
+          });
+    return monthFiltered.filter((o) => !isInv(o) && getClientKeyForOrder(o) !== 'unknown');
+  }, [baseOrders, monthKey, invoicedDocsByOrderId]);
+
+  const bulkClientOptions = useMemo(() => {
+    const map = new Map();
+    bulkEligibleOrders.forEach((o) => {
+      const key = getClientKeyForOrder(o);
+      if (key === 'unknown') return;
+      const prev = map.get(key) || {
+        key,
+        client_name: String(o?.client_name || '').trim(),
+        client_id: o?.client_id ?? null,
+        count: 0,
+        total_amount_bgn: 0,
+      };
+      prev.count += 1;
+      prev.total_amount_bgn += Number(o?.total_amount_bgn) || 0;
+      // Keep the latest non-empty client_name
+      if (!prev.client_name) prev.client_name = String(o?.client_name || '').trim();
+      map.set(key, prev);
+    });
+
+    return Array.from(map.values()).sort((a, b) => {
+      // More orders first, then name
+      if (b.count !== a.count) return b.count - a.count;
+      return String(a.client_name || '').localeCompare(String(b.client_name || ''), 'bg');
+    });
+  }, [bulkEligibleOrders]);
+
+  const bulkOrdersForSelectedClient = useMemo(() => {
+    if (!bulkClientKey) return [];
+    return bulkEligibleOrders.filter((o) => getClientKeyForOrder(o) === bulkClientKey);
+  }, [bulkEligibleOrders, bulkClientKey]);
+
+  const bulkSelectedOrders = useMemo(() => {
+    const set = new Set((bulkSelectedOrderIds || []).map((x) => Number(x)));
+    return bulkOrdersForSelectedClient.filter((o) => set.has(Number(o?.id)));
+  }, [bulkOrdersForSelectedClient, bulkSelectedOrderIds]);
 
   // Simple financial/order stats (completed orders list)
   const now = new Date();
@@ -839,6 +951,665 @@ export default function Invoices({ canDeleteInvoices = false }) {
       },
     });
     return res.data;
+  };
+
+  const reserveBulkDocumentNumbers = async ({ orderIds }) => {
+    const res = await axios.post(`${getApiBaseUrl()}/orders/documents/reserve-bulk`, {
+      order_ids: orderIds,
+      issue_date: String(bulkIssueDateDraft || '').trim() || undefined,
+      multipliers: {
+        out_of_hours: bulkMultOutOfHoursChecked,
+        holiday: bulkMultHolidayChecked,
+        out_of_service: bulkMultOutOfServiceChecked,
+      },
+    });
+    return res.data;
+  };
+
+  const loadWorktimesForManyOrders = async (orderIds) => {
+    const ids = Array.isArray(orderIds) ? orderIds : [];
+    const pairs = await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const res = await axios.get(`${getApiBaseUrl()}/orders/${id}/worktimes`);
+          return [id, Array.isArray(res.data) ? res.data : []];
+        } catch {
+          return [id, []];
+        }
+      })
+    );
+    const map = {};
+    pairs.forEach(([id, rows]) => {
+      map[id] = rows;
+    });
+    return map;
+  };
+
+  const saveBulkFreeOpsPrice = async ({ orderId, orderWorktimeId }) => {
+    const raw = bulkFreeOpsPriceDraftByRowId?.[orderWorktimeId];
+    const parsed = Number(String(raw ?? '').replace(',', '.'));
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      alert('Моля въведете валидна цена (> 0 лв) за „Свободни Операции“.');
+      return;
+    }
+
+    try {
+      setBulkFreeOpsSavingRowId(orderWorktimeId);
+      await axios.put(`${getApiBaseUrl()}/orders/${orderId}/worktimes/${orderWorktimeId}`, {
+        unit_price_bgn: parsed,
+      });
+
+      // Reload worktimes just for this order and recompute missing list.
+      const res = await axios.get(`${getApiBaseUrl()}/orders/${orderId}/worktimes`);
+      const updatedRows = Array.isArray(res.data) ? res.data : [];
+
+      setBulkWorktimesByOrderId((prev) => ({ ...(prev || {}), [orderId]: updatedRows }));
+
+      // Recompute missing list from the updated map.
+      // NOTE: use the latest data for this order (updatedRows) plus previous for all others.
+      setBulkMissingFreeOps((prevMissing) => {
+        const prev = Array.isArray(prevMissing) ? prevMissing : [];
+        // Remove all missing items for this order, then re-add if still missing.
+        const kept = prev.filter((x) => Number(x?.order_id) !== Number(orderId));
+        const nowMissing = updatedRows
+          .filter((r) => String(r?.component_type || '').trim() === 'free_ops')
+          .filter((r) => {
+            const qty = Number(r?.quantity) || 0;
+            const price = Number(r?.unit_price_bgn);
+            return qty > 0 && (!Number.isFinite(price) || price <= 0);
+          })
+          .map((r) => ({
+            order_id: orderId,
+            order_worktime_id: r?.id,
+            title: r?.worktime_title || '',
+            quantity: Number(r?.quantity) || 0,
+            unit_price_bgn: r?.unit_price_bgn,
+          }));
+
+        return [...kept, ...nowMissing];
+      });
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Грешка при запис на цена.');
+    } finally {
+      setBulkFreeOpsSavingRowId(null);
+    }
+  };
+
+  const fetchRecipientForBulkClient = async (ordersForClient) => {
+    const first = Array.isArray(ordersForClient) ? ordersForClient[0] : null;
+    if (!first) return null;
+
+    try {
+      if (first.client_id) {
+        const res = await axios.get(`${getApiBaseUrl()}/clients/${first.client_id}`);
+        const client = res.data;
+        return {
+          name: client?.name || first.client_name || '',
+          eik: client?.eik || '',
+          vat_number: client?.vat_number || '',
+          city: client?.city || '',
+          address: client?.address || '',
+          mol: client?.mol || '',
+        };
+      }
+
+      const name = String(first.client_name || '').trim();
+      if (!name) return null;
+      const res = await axios.get(`${getApiBaseUrl()}/clients/search?q=${encodeURIComponent(name)}`);
+      const list = Array.isArray(res.data) ? res.data : [];
+      const client = list.find((c) => c?.name === name) || list[0] || null;
+      return {
+        name: client?.name || name,
+        eik: client?.eik || '',
+        vat_number: client?.vat_number || '',
+        city: client?.city || '',
+        address: client?.address || '',
+        mol: client?.mol || '',
+      };
+    } catch {
+      return {
+        name: first.client_name || '',
+        eik: '',
+        vat_number: '',
+        city: '',
+        address: '',
+        mol: '',
+      };
+    }
+  };
+
+  const bulkAppliedMultiplierPreview = useMemo(() => {
+    const mOutOfHours = Number(company.price_multiplier_out_of_hours) || 1;
+    const mHoliday = Number(company.price_multiplier_holiday) || 1;
+    const mOutOfService = Number(company.price_multiplier_out_of_service) || 1;
+    return (
+      (bulkMultOutOfHoursChecked ? mOutOfHours : 1) *
+      (bulkMultHolidayChecked ? mHoliday : 1) *
+      (bulkMultOutOfServiceChecked ? mOutOfService : 1)
+    );
+  }, [
+    company.price_multiplier_out_of_hours,
+    company.price_multiplier_holiday,
+    company.price_multiplier_out_of_service,
+    bulkMultOutOfHoursChecked,
+    bulkMultHolidayChecked,
+    bulkMultOutOfServiceChecked,
+  ]);
+
+  const bulkPreviewLines = useMemo(() => {
+    const hourlyRate = Number(company.hourly_rate) || 100;
+    const vatRate = Number(company.vat_rate) || 20;
+    const multiplier = Number(bulkAppliedMultiplierPreview) || 1;
+
+    return bulkSelectedOrders
+      .map((o) => {
+        const totalHours = Number(o?.total_hours) || 0;
+        const freeOps = Number(o?.free_ops_amount_bgn) || 0;
+        const taxBase = totalHours * hourlyRate * multiplier + freeOps;
+        const vatAmount = taxBase * (vatRate / 100);
+        const totalAmount = taxBase + vatAmount;
+        return {
+          order: o,
+          taxBase,
+          vatAmount,
+          totalAmount,
+        };
+      })
+      .sort((a, b) => Number(b.order?.id) - Number(a.order?.id));
+  }, [bulkSelectedOrders, company.hourly_rate, company.vat_rate, bulkAppliedMultiplierPreview]);
+
+  const bulkPreviewTotals = useMemo(() => {
+    const taxBase = bulkPreviewLines.reduce((s, x) => s + (Number(x.taxBase) || 0), 0);
+    const vatAmount = bulkPreviewLines.reduce((s, x) => s + (Number(x.vatAmount) || 0), 0);
+    const totalAmount = bulkPreviewLines.reduce((s, x) => s + (Number(x.totalAmount) || 0), 0);
+    return { taxBase, vatAmount, totalAmount };
+  }, [bulkPreviewLines]);
+
+  const openBulkInvoicePrint = ({
+    docsByOrderId,
+    worktimesByOrderId: wtByOrderId,
+    previewLines,
+    issueDate,
+    recipient,
+    multiplierOverride,
+  }) => {
+    // Print: Protocol (original+copy) for each order, then ONE invoice (original+copy) with multiple lines.
+    // docsByOrderId: { [orderId]: order_documents row }
+
+    const hourlyRate = Number(company.hourly_rate) || 100;
+    const vatRate = Number(company.vat_rate) || 20;
+    const eurRate = Number(company.eur_rate) || 1.95583;
+    const toEur = (bgn) => (Number(bgn) || 0) / eurRate;
+    const fmt2 = (n) => (Number(n) || 0).toFixed(2);
+    const fmtBgnEur = (bgn) => `${fmt2(bgn)} лв / ${fmt2(toEur(bgn))} EUR`;
+    const fmtBgnEurHtml = (bgn) => {
+      const b = Number(bgn) || 0;
+      const e = toEur(b);
+      return `<div>${fmt2(b)} лв</div><div class="muted" style="font-size:12px;">${fmt2(e)} EUR</div>`;
+    };
+
+    const multiplier = Number(multiplierOverride != null ? multiplierOverride : bulkAppliedMultiplierPreview) || 1;
+    const effectiveHourlyRate = hourlyRate * multiplier;
+    const safeEffectiveHourlyRate = Math.max(0.000001, Number(effectiveHourlyRate) || 0.000001);
+
+    const escapeHtmlLocal = (unsafe) =>
+      String(unsafe ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+
+    const formatSqliteDateOnlyLocal = (dt) => {
+      if (!dt) return '—';
+      const s = String(dt);
+      const dateOnlyMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (dateOnlyMatch) {
+        return `${dateOnlyMatch[3]}.${dateOnlyMatch[2]}.${dateOnlyMatch[1]}`;
+      }
+      const safe = s.replace(' ', 'T');
+      const d = new Date(safe);
+      return Number.isNaN(d.getTime()) ? s.slice(0, 10) : d.toLocaleDateString('bg-BG');
+    };
+
+    const logoDataUrl = company.logo_data_url || '';
+    const logoHtml = logoDataUrl
+      ? `<img src="${escapeHtmlLocal(logoDataUrl)}" style="max-width:110px; max-height:110px; object-fit:contain;" />`
+      : '';
+
+    const WATERMARK_ORIGINAL = 'ОРИГИНАЛ';
+    const WATERMARK_COPY = 'КОПИЕ';
+
+    const lines = Array.isArray(previewLines) ? previewLines : bulkPreviewLines;
+    const invoiceNo = lines[0]?.order?.id
+      ? docsByOrderId?.[lines[0].order.id]?.invoice_no
+      : '';
+    const resolvedIssueDate = String(issueDate || bulkIssueDateDraft || '').trim() || new Date().toISOString().slice(0, 10);
+    const resolvedRecipient = recipient || bulkRecipientDraft;
+
+    const protocolPagesHtml = lines
+      .map(({ order }) => {
+        const doc = docsByOrderId?.[order.id];
+        const protocolNo = doc?.protocol_no || '';
+
+        const rows = Array.isArray(wtByOrderId?.[order.id]) ? wtByOrderId[order.id] : [];
+        const laborRows = rows.filter((r) => String(r?.component_type || '').trim() !== 'free_ops');
+        const freeRows = rows.filter((r) => String(r?.component_type || '').trim() === 'free_ops');
+
+        const totalHours = laborRows.reduce(
+          (sum, r) => sum + (Number(r.hours) || 0) * (Number(r.quantity) || 0),
+          0
+        );
+        const freeOpsNet = freeRows.reduce(
+          (sum, r) => sum + (Number(r.unit_price_bgn) || 0) * (Number(r.quantity) || 0),
+          0
+        );
+        const freeOpsHoursEqTotal = freeOpsNet / safeEffectiveHourlyRate;
+        const protocolTotalHours = totalHours + freeOpsHoursEqTotal;
+
+        const laborTaxBase = protocolTotalHours * effectiveHourlyRate;
+        const taxBase = laborTaxBase;
+        const vatAmount = taxBase * (vatRate / 100);
+        const totalAmount = taxBase + vatAmount;
+
+        const makeRows = () => {
+          if (!rows.length) return '<tr><td colspan="6" class="muted">Няма добавени нормовремена</td></tr>';
+          return rows
+            .map((r, idx) => {
+              const isFree = String(r?.component_type || '').trim() === 'free_ops';
+              const qty = Number(r.quantity) || 0;
+              const baseHours = Number(r.hours) || 0;
+              const unitPrice = Number(r.unit_price_bgn) || 0;
+              const hoursPerUnit = isFree ? unitPrice / safeEffectiveHourlyRate : baseHours;
+              const total = hoursPerUnit * qty;
+              const notes = r.notes ? escapeHtmlLocal(r.notes) : '';
+              return `
+                <tr>
+                  <td style="text-align:center">${idx + 1}</td>
+                  <td>${escapeHtmlLocal(r.worktime_title || '')}</td>
+                  <td class="notes">${notes}</td>
+                  <td style="text-align:right">${hoursPerUnit.toFixed(2).replace(/\.00$/, '')}</td>
+                  <td style="text-align:right">${qty}</td>
+                  <td style="text-align:right">${total.toFixed(2).replace(/\.00$/, '')}</td>
+                </tr>
+              `;
+            })
+            .join('');
+        };
+
+        const makeProtocolPage = (watermarkLabel) => `
+          <div class="page">
+            <div class="watermark"><span>${escapeHtmlLocal(watermarkLabel)}</span></div>
+            <div class="content">
+              <div class="topbar">
+                <div>
+                  <h1>Протокол</h1>
+                  <div class="meta"><strong>No:</strong> ${escapeHtmlLocal(protocolNo)}</div>
+                  <div class="meta"><strong>Към фактура No:</strong> ${escapeHtmlLocal(invoiceNo || '')}</div>
+                  <div class="meta"><span class="badge">${escapeHtmlLocal(watermarkLabel)}</span></div>
+                </div>
+                ${logoHtml}
+              </div>
+
+              <div class="grid2">
+                <div class="block">
+                  <div class="title">Получател:</div>
+                   <div class="rowline"><div class="k">Име на фирма:</div><div class="v">${escapeHtmlLocal(resolvedRecipient.name)}</div></div>
+                   <div class="rowline"><div class="k">ЕИК:</div><div class="v">${escapeHtmlLocal(resolvedRecipient.eik)}</div></div>
+                   <div class="rowline"><div class="k">ДДС No:</div><div class="v">${escapeHtmlLocal(resolvedRecipient.vat_number)}</div></div>
+                   <div class="rowline"><div class="k">Град:</div><div class="v">${escapeHtmlLocal(resolvedRecipient.city)}</div></div>
+                   <div class="rowline"><div class="k">Адрес:</div><div class="v">${escapeHtmlLocal(resolvedRecipient.address)}</div></div>
+                   <div class="rowline"><div class="k">МОЛ:</div><div class="v">${escapeHtmlLocal(resolvedRecipient.mol)}</div></div>
+                 </div>
+                <div class="block">
+                  <div class="title">Доставчик:</div>
+                  <div class="rowline"><div class="k">Име на фирма:</div><div class="v">${escapeHtmlLocal(company.company_name)}</div></div>
+                  <div class="rowline"><div class="k">ЕИК:</div><div class="v">${escapeHtmlLocal(company.eik)}</div></div>
+                  <div class="rowline"><div class="k">ДДС No:</div><div class="v">${escapeHtmlLocal(company.vat_number)}</div></div>
+                  <div class="rowline"><div class="k">Град:</div><div class="v">${escapeHtmlLocal(company.city)}</div></div>
+                  <div class="rowline"><div class="k">Адрес:</div><div class="v">${escapeHtmlLocal(company.address)}</div></div>
+                  <div class="rowline"><div class="k">МОЛ:</div><div class="v">${escapeHtmlLocal(company.mol)}</div></div>
+                </div>
+              </div>
+
+              <div style="display:flex; justify-content: space-between; gap: 18mm; margin-top: 10mm;">
+                <div style="flex:1;" class="summary">
+                  <div class="line"><span class="k">Дата на издаване:</span><span class="v">${escapeHtmlLocal(formatSqliteDateOnlyLocal(resolvedIssueDate))}</span></div>
+                  <div class="line"><span class="k">Дата на дан. събитие:</span><span class="v">${escapeHtmlLocal(formatSqliteDateOnlyLocal(resolvedIssueDate))}</span></div>
+                  <div class="line"><span class="k">Място на сделката:</span><span class="v">${escapeHtmlLocal(company.city || '')}</span></div>
+                  <div class="line"><span class="k">Рег. №:</span><span class="v">${escapeHtmlLocal(order.reg_number || '')}</span></div>
+                </div>
+                <div style="flex:1;" class="summary">
+                  <div class="line"><span>Данъчна основа (${vatRate.toFixed(2)} %):</span><span><strong>${fmtBgnEur(taxBase)}</strong></span></div>
+                  <div class="line"><span>Начислен ДДС:</span><span><strong>${fmtBgnEur(vatAmount)}</strong></span></div>
+                  <div class="line" style="margin-top:6px;"><span><strong>Сума за плащане:</strong></span><span class="big">${fmtBgnEur(totalAmount)}</span></div>
+                </div>
+              </div>
+
+              <div style="margin-top: 10mm;">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width: 10mm; text-align:center;">No</th>
+                    <th>Име на стоката/услугата</th>
+                    <th style="width: 55mm;">Бележки</th>
+                    <th style="width: 18mm; text-align:right;">Часове</th>
+                    <th style="width: 16mm; text-align:right;">К-во</th>
+                    <th style="width: 22mm; text-align:right;">Общо (ч.)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${makeRows()}
+                </tbody>
+              </table>
+
+              <div style="display:flex; justify-content: space-between; gap: 18mm; margin-top: 10mm;">
+                <div style="flex:1;" class="summary">
+                  <div class="line"><span>Начин на плащане:</span><span><strong>${escapeHtmlLocal(company.payment_method || 'Банков път')}</strong></span></div>
+                  <div class="line"><span>Банкови реквизити:</span><span></span></div>
+                  <div class="line"><span></span><span><strong>${escapeHtmlLocal(company.bank_name)}${company.bic ? `, BIC: ${escapeHtmlLocal(company.bic)}` : ''}</strong></span></div>
+                  <div class="line"><span></span><span><strong>${escapeHtmlLocal(company.iban)}</strong></span></div>
+                </div>
+                 <div style="flex:1;" class="summary">
+                   <div class="line"><span><strong>Труд (часове):</strong></span><span><strong>${protocolTotalHours.toFixed(2).replace(/\.00$/, '')} ч.</strong></span></div>
+                   <div class="line"><span><strong>Цена на час:</strong></span><span><strong>${fmtBgnEur(effectiveHourlyRate)}</strong></span></div>
+                   <div class="line"><span><strong>Труд (без ДДС):</strong></span><span><strong>${fmtBgnEur(taxBase)}</strong></span></div>
+                   <div class="line"><span><strong>ДДС:</strong></span><span><strong>${fmtBgnEur(vatAmount)}</strong></span></div>
+                   <div class="line"><span><strong>За плащане:</strong></span><span><strong>${fmtBgnEur(totalAmount)}</strong></span></div>
+                 </div>
+                </div>
+
+              <div style="display:flex; justify-content: flex-end; margin-top: 10mm;">
+                <div style="min-width: 80mm; text-align: left;">
+                  <div class="meta"><strong>Съставил:</strong> ${escapeHtmlLocal(preparedBy || '—')}</div>
+                </div>
+              </div>
+              </div>
+            </div>
+          </div>
+        `;
+
+        return `${makeProtocolPage(WATERMARK_ORIGINAL)}${makeProtocolPage(WATERMARK_COPY)}`;
+      })
+      .join('');
+
+    const invoiceRowsHtml = lines
+      .map(({ order, taxBase }, idx) => {
+        const doc = docsByOrderId?.[order.id];
+        const protocolNo = doc?.protocol_no || '';
+        const desc = `Ремонт на превозно средство с регистрационен номер ${order.reg_number || ''} съгласно работна карта: ${protocolNo}`;
+        return `
+          <tr>
+            <td style="text-align:center">${idx + 1}</td>
+            <td>${escapeHtmlLocal(desc)}</td>
+            <td>${escapeHtmlLocal(order.reg_number || '')}</td>
+            <td style="text-align:right">1</td>
+            <td style="text-align:right">${fmtBgnEurHtml(taxBase)}</td>
+            <td style="text-align:right">${vatRate.toFixed(2)}%</td>
+            <td style="text-align:right">${fmtBgnEurHtml(taxBase)}</td>
+          </tr>
+        `;
+      })
+      .join('');
+
+    const totalsLocal = lines.reduce(
+      (acc, x) => {
+        acc.taxBase += Number(x?.taxBase) || 0;
+        acc.vatAmount += Number(x?.vatAmount) || 0;
+        acc.totalAmount += Number(x?.totalAmount) || 0;
+        return acc;
+      },
+      { taxBase: 0, vatAmount: 0, totalAmount: 0 }
+    );
+
+    const taxBaseSum = Number(totalsLocal.taxBase) || 0;
+    const vatSum = Number(totalsLocal.vatAmount) || 0;
+    const totalSum = Number(totalsLocal.totalAmount) || 0;
+
+    const makeInvoicePage = (watermarkLabel) => `
+      <div class="page">
+        <div class="watermark"><span>${escapeHtmlLocal(watermarkLabel)}</span></div>
+        <div class="content">
+          ${logoHtml ? `<div style="display:flex; justify-content:flex-end;">${logoHtml}</div>` : ''}
+          <div class="grid2" style="margin-top: 6mm;">
+            <div>
+              <div class="meta" style="font-weight:800;">Получател:</div>
+              <div style="border:1px solid #111; padding: 6px 8px; font-size: 12px;">
+                <div><span class="k">Име на фирма:</span> <strong>${escapeHtmlLocal(resolvedRecipient.name)}</strong></div>
+                <div><span class="k">ЕИК:</span> <strong>${escapeHtmlLocal(resolvedRecipient.eik)}</strong></div>
+                <div><span class="k">ДДС №:</span> <strong>${escapeHtmlLocal(resolvedRecipient.vat_number)}</strong></div>
+                <div><span class="k">Град:</span> <strong>${escapeHtmlLocal(resolvedRecipient.city)}</strong></div>
+                <div><span class="k">Адрес:</span> <strong>${escapeHtmlLocal(resolvedRecipient.address)}</strong></div>
+                <div><span class="k">МОЛ:</span> <strong>${escapeHtmlLocal(resolvedRecipient.mol)}</strong></div>
+              </div>
+            </div>
+            <div>
+              <div class="meta" style="font-weight:800;">Доставчик:</div>
+              <div style="border:1px solid #111; padding: 6px 8px; font-size: 12px;">
+                <div><span class="k">Име на фирма:</span> <strong>${escapeHtmlLocal(company.company_name)}</strong></div>
+                <div><span class="k">ЕИК:</span> <strong>${escapeHtmlLocal(company.eik)}</strong></div>
+                <div><span class="k">ДДС №:</span> <strong>${escapeHtmlLocal(company.vat_number)}</strong></div>
+                <div><span class="k">Град:</span> <strong>${escapeHtmlLocal(company.city)}</strong></div>
+                <div><span class="k">Адрес:</span> <strong>${escapeHtmlLocal(company.address)}</strong></div>
+                <div><span class="k">МОЛ:</span> <strong>${escapeHtmlLocal(company.mol)}</strong></div>
+              </div>
+            </div>
+          </div>
+
+          <div style="text-align:center; margin-top: 8mm;">
+            <div style="font-size: 18px; font-weight: 900; letter-spacing: 0.5px;">Фактура</div>
+            <div class="meta"><strong>No:</strong> ${escapeHtmlLocal(invoiceNo || '')}</div>
+            <div class="meta"><span class="badge">${escapeHtmlLocal(watermarkLabel)}</span></div>
+          </div>
+
+          <div style="border-top: 2px solid #111; border-bottom: 2px solid #111; padding: 6px 0; margin-top: 4mm; display:flex; gap: 10mm; font-size: 12.5px;">
+            <div><span class="k">Дата на издаване:</span> <strong>${escapeHtmlLocal(formatSqliteDateOnlyLocal(resolvedIssueDate))}</strong></div>
+            <div><span class="k">Дата на дан. събитие:</span> <strong>${escapeHtmlLocal(formatSqliteDateOnlyLocal(resolvedIssueDate))}</strong></div>
+            <div style="margin-left:auto;"><span class="k">Място на сделката:</span> <strong>${escapeHtmlLocal(company.city || '')}</strong></div>
+          </div>
+
+          <div style="margin-top: 6mm;">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:10mm; text-align:center;">No</th>
+                  <th>Име на стоката/услугата</th>
+                  <th style="width: 25mm;">Марка</th>
+                  <th style="width: 14mm; text-align:right;">К-во</th>
+                  <th style="width: 22mm; text-align:right;">Ед. цена</th>
+                  <th style="width: 18mm; text-align:right;">ДДС (%)</th>
+                  <th style="width: 26mm; text-align:right;">Стойност</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${invoiceRowsHtml}
+                <tr>
+                  <td colspan="6" style="text-align:right; font-weight:700;">Данъчна основа (без ДДС):</td>
+                  <td style="text-align:right; font-weight:700;">${fmtBgnEur(taxBaseSum)}</td>
+                </tr>
+                <tr>
+                  <td colspan="6" style="text-align:right; font-weight:700;">Начислен ДДС (${vatRate.toFixed(2)} %):</td>
+                  <td style="text-align:right; font-weight:700;">${fmtBgnEur(vatSum)}</td>
+                </tr>
+                <tr>
+                  <td colspan="6" style="text-align:right; font-weight:900;">Сума за плащане:</td>
+                  <td style="text-align:right; font-weight:900;">${fmtBgnEur(totalSum)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div style="display:flex; justify-content: space-between; gap: 18mm; margin-top: 10mm; font-size: 12.5px;">
+            <div style="flex:1;">
+              <div><span class="k">Начин на плащане:</span> <strong>${escapeHtmlLocal(company.payment_method || 'Банков път')}</strong></div>
+              <div style="margin-top: 6px;"><span class="k">Банкови реквизити:</span></div>
+              <div><strong>${escapeHtmlLocal(company.bank_name)}${company.bic ? `, BIC: ${escapeHtmlLocal(company.bic)}` : ''}</strong></div>
+              <div><strong>${escapeHtmlLocal(company.iban)}</strong></div>
+            </div>
+            <div style="flex:1;">
+              <div><span class="k">В евро:</span> <strong>${fmt2(toEur(totalSum))} EUR</strong></div>
+              <div style="margin-top: 6px;"><span class="k">Основание:</span></div>
+              <div class="muted">Групова фактура за ${lines.length} поръчки</div>
+            </div>
+          </div>
+
+          <div style="display:flex; justify-content: flex-end; margin-top: 12mm;">
+            <div style="min-width: 80mm; text-align: left;">
+              <div class="meta"><strong>Съставил:</strong> ${escapeHtmlLocal(preparedBy || '—')}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const pagesHtml = [
+      protocolPagesHtml,
+      makeInvoicePage(WATERMARK_ORIGINAL),
+      makeInvoicePage(WATERMARK_COPY),
+    ].join('');
+
+    const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Групова фактура ${escapeHtmlLocal(invoiceNo || '')}</title>
+      <style>
+      @page { size: A4; margin: 14mm; }
+      body {
+        font-family: Arial, sans-serif;
+        color: #111;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .page { page-break-after: always; position: relative; min-height: 269mm; }
+      .page:last-child { page-break-after: auto; }
+      .watermark { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 0; }
+      .watermark span { transform: rotate(-25deg); font-size: 92px; font-weight: 900; color: #000; opacity: 0.07; letter-spacing: 6px; text-transform: uppercase; }
+      .content { position: relative; z-index: 1; padding-bottom: 16mm; }
+      h1 { margin: 0 0 6px 0; font-size: 26px; font-weight: 900; letter-spacing: 0.3px; }
+      .meta { font-size: 13px; color: #333; margin-bottom: 12px; }
+      table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      th, td { border: 1px solid #333; padding: 6px 8px; }
+      th { background: #f5f5f5; text-align: left; }
+      tbody tr:nth-child(even) td { background: #fafafa; }
+      td.notes { min-height: 32px; vertical-align: top; white-space: pre-wrap; }
+      .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18mm; }
+      .block { border-top: 2px solid #111; }
+      .block .title { background: #f5f5f5; font-weight: 900; padding: 4px 8px; text-align: center; border-bottom: 1px solid #ddd; }
+      .rowline { display: grid; grid-template-columns: 110px 1fr; gap: 8px; padding: 4px 8px; border-bottom: 1px solid #cbd5e1; font-size: 12.5px; }
+      .rowline .k { color: #334155; }
+      .rowline .v { font-weight: 700; }
+      .topbar { display: flex; justify-content: space-between; align-items: flex-start; }
+      .summary { font-size: 13px; }
+      .summary .line { display: flex; justify-content: space-between; padding: 4px 0; }
+      .summary .big { font-size: 22px; font-weight: 900; }
+      .muted { color: #555; }
+      .badge { display: inline-block; border: 2px solid #111; padding: 2px 10px; font-weight: 900; letter-spacing: 1px; }
+      @media print {
+        body { margin: 0; }
+      }
+    </style>
+  </head>
+  <body>
+    ${pagesHtml}
+    <script>
+      window.onload = function () {
+        try { window.focus(); } catch (e) {}
+        try { window.print(); } catch (e) {}
+        window.onafterprint = function () {
+          try { window.close(); } catch (e) {}
+        };
+      };
+    </script>
+  </body>
+</html>`;
+
+    const w = window.open('about:blank', '_blank');
+    if (!w) {
+      alert('Не може да се отвори прозорец за принтиране (popup blocker).');
+      return;
+    }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  };
+
+  const openExistingGroupInvoicePrint = async (invoiceNo) => {
+    const inv = String(invoiceNo || '').trim();
+    if (!inv) return;
+
+    try {
+      setGroupPreviewLoading(true);
+
+      const ordersInGroup = (orders || []).filter(
+        (o) => String(invoicedDocsByOrderId?.[o?.id]?.invoice_no || '').trim() === inv
+      );
+      const ids = ordersInGroup.map((o) => o.id).filter(Boolean);
+      if (ids.length < 2) {
+        alert('Не са намерени поръчки в групата.');
+        return;
+      }
+
+      const wtMap = await loadWorktimesForManyOrders(ids);
+
+      const docsByOrderId = {};
+      ids.forEach((id) => {
+        if (invoicedDocsByOrderId?.[id]) docsByOrderId[id] = invoicedDocsByOrderId[id];
+      });
+
+      const firstDoc = docsByOrderId[ids[0]];
+      const issueDate = String(firstDoc?.issue_date || '').slice(0, 10);
+      const multiplier =
+        (Number(firstDoc?.mult_out_of_hours) || 1) *
+        (Number(firstDoc?.mult_holiday) || 1) *
+        (Number(firstDoc?.mult_out_of_service) || 1);
+
+      const rec = await fetchRecipientForBulkClient(ordersInGroup);
+      const resolvedRecipient = rec || bulkRecipientDraft;
+
+      const hourlyRate = Number(company.hourly_rate) || 100;
+      const vatRate = Number(company.vat_rate) || 20;
+
+      const lines = ordersInGroup
+        .map((o) => {
+          const totalHours = Number(o?.total_hours) || 0;
+          const freeOps = Number(o?.free_ops_amount_bgn) || 0;
+          const taxBase = totalHours * hourlyRate * multiplier + freeOps;
+          const vatAmount = taxBase * (vatRate / 100);
+          const totalAmount = taxBase + vatAmount;
+          return { order: o, taxBase, vatAmount, totalAmount };
+        })
+        .sort((a, b) => Number(b.order?.id) - Number(a.order?.id));
+
+      openBulkInvoicePrint({
+        docsByOrderId,
+        worktimesByOrderId: wtMap,
+        previewLines: lines,
+        issueDate,
+        recipient: resolvedRecipient,
+        multiplierOverride: multiplier,
+      });
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Грешка при преглед на груповата фактура');
+    } finally {
+      setGroupPreviewLoading(false);
+    }
+  };
+
+  const deleteGroupInvoiceByInvoiceNo = async (invoiceNo) => {
+    const inv = String(invoiceNo || '').trim();
+    if (!inv) return;
+    if (!window.confirm(`Сигурни ли сте, че искате да изтриете груповата фактура №${inv}?`)) return;
+
+    try {
+      await axios.delete(`${getApiBaseUrl()}/orders/documents/by-invoice/${encodeURIComponent(inv)}`);
+      // Refresh local doc map
+      await loadOrderDocuments();
+      setGroupFocusInvoiceNo('');
+      alert('Груповата фактура е изтрита.');
+    } catch (e) {
+      alert(e?.response?.data?.error || 'Грешка при изтриване на груповата фактура.');
+    }
   };
 
   const sendInvoiceEmailForDoc = async (docNumbers) => {
@@ -1827,6 +2598,224 @@ export default function Invoices({ canDeleteInvoices = false }) {
         </Box>
       </Paper>
 
+      {/* Bulk invoicing */}
+      <Paper variant="outlined" sx={{ mb: 2, p: { xs: 1.25, sm: 2 }, borderRadius: 2 }}>
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} alignItems={{ xs: 'stretch', md: 'center' }}>
+          <Box sx={{ flex: '1 1 auto' }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 900 }}>
+              Групово фактуриране
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Изберете клиент, маркирайте поръчки и направете една обща фактура.
+            </Typography>
+          </Box>
+
+          <FormControlLabel
+            control={
+              <Switch
+                checked={bulkEnabled}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  setBulkEnabled(next);
+                  if (!next) {
+                    setBulkClientKey('');
+                    setBulkSelectedOrderIds([]);
+                    setBulkMissingFreeOps([]);
+                    setBulkWorktimesByOrderId({});
+                  }
+                }}
+              />
+            }
+            label={bulkEnabled ? 'Включено' : 'Изключено'}
+          />
+        </Stack>
+
+        {bulkEnabled ? (
+          <Box sx={{ mt: 1.5, display: 'grid', gridTemplateColumns: { xs: '1fr', md: '420px 1fr' }, gap: 1.5 }}>
+            <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 900, mb: 1 }}>
+                1) Клиент
+              </Typography>
+
+              <FormControl fullWidth size={isPhone ? 'small' : 'medium'}>
+                <InputLabel id="bulk-client-label">Клиент</InputLabel>
+                <Select
+                  labelId="bulk-client-label"
+                  label="Клиент"
+                  value={bulkClientKey}
+                  onChange={async (e) => {
+                    const key = e.target.value;
+                    setBulkClientKey(key);
+                    setBulkSelectedOrderIds([]);
+                    setBulkMissingFreeOps([]);
+                    setBulkWorktimesByOrderId({});
+                    const candidateOrders = bulkEligibleOrders.filter((o) => getClientKeyForOrder(o) === key);
+                    const rec = await fetchRecipientForBulkClient(candidateOrders);
+                    if (rec) setBulkRecipientDraft(rec);
+                  }}
+                  renderValue={(val) => {
+                    const opt = bulkClientOptions.find((x) => x.key === val);
+                    if (!opt) return '—';
+                    return `${opt.client_name || '—'} (${opt.count})`;
+                  }}
+                >
+                  {bulkClientOptions.map((opt) => (
+                    <MenuItem key={opt.key} value={opt.key}>
+                      <Box sx={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                        <Typography sx={{ fontWeight: 800, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {opt.client_name || '—'}
+                        </Typography>
+                        <Chip label={`${opt.count}`} size="small" variant="outlined" sx={{ fontWeight: 900 }} />
+                      </Box>
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              <Box sx={{ mt: 1.25, display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.25 }}>
+                <TextField
+                  label="Дата на фактуриране"
+                  type="date"
+                  value={bulkIssueDateDraft}
+                  onChange={(e) => setBulkIssueDateDraft(e.target.value)}
+                  fullWidth
+                  size={isPhone ? 'small' : 'medium'}
+                  InputLabelProps={{ shrink: true }}
+                  helperText="Дата, която ще се отпечата във фактурата/протоколите."
+                />
+                <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 900, display: 'block' }}>
+                    Коефициенти
+                  </Typography>
+                  <FormControlLabel
+                    control={<Checkbox checked={bulkMultOutOfHoursChecked} onChange={(e) => setBulkMultOutOfHoursChecked(e.target.checked)} />}
+                    label={`Извън раб. време (x${Number(company.price_multiplier_out_of_hours) || 1})`}
+                    sx={{ mr: 0 }}
+                  />
+                  <FormControlLabel
+                    control={<Checkbox checked={bulkMultHolidayChecked} onChange={(e) => setBulkMultHolidayChecked(e.target.checked)} />}
+                    label={`Почивен ден (x${Number(company.price_multiplier_holiday) || 1})`}
+                    sx={{ mr: 0 }}
+                  />
+                  <FormControlLabel
+                    control={<Checkbox checked={bulkMultOutOfServiceChecked} onChange={(e) => setBulkMultOutOfServiceChecked(e.target.checked)} />}
+                    label={`Извън сервиз (x${Number(company.price_multiplier_out_of_service) || 1})`}
+                    sx={{ mr: 0 }}
+                  />
+                </Paper>
+              </Box>
+            </Paper>
+
+            <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, minWidth: 0 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap', mb: 1 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 900 }}>
+                  2) Поръчки за включване
+                </Typography>
+                <Stack direction="row" spacing={1}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    disabled={!bulkClientKey || bulkOrdersForSelectedClient.length === 0}
+                    onClick={() => setBulkSelectedOrderIds(bulkOrdersForSelectedClient.map((o) => o.id))}
+                  >
+                    Избери всички
+                  </Button>
+                  <Button size="small" variant="outlined" disabled={bulkSelectedOrderIds.length === 0} onClick={() => setBulkSelectedOrderIds([])}>
+                    Изчисти
+                  </Button>
+                </Stack>
+              </Box>
+
+              {!bulkClientKey ? (
+                <Typography variant="body2" color="text.secondary">
+                  Изберете клиент.
+                </Typography>
+              ) : bulkOrdersForSelectedClient.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  Няма нефактурирани приключени поръчки за този клиент (според текущия „Изглед/Месец“).
+                </Typography>
+              ) : (
+                <List dense sx={{ p: 0 }}>
+                  {bulkOrdersForSelectedClient.map((o, idx) => {
+                    const checked = bulkSelectedOrderIds.includes(o.id);
+                    const completedAt = o.completed_at || o.created_at;
+                    return (
+                      <div key={o.id}>
+                        <ListItem
+                          button
+                          onClick={() => {
+                            setBulkSelectedOrderIds((prev) => {
+                              const set = new Set(prev);
+                              if (set.has(o.id)) set.delete(o.id);
+                              else set.add(o.id);
+                              return Array.from(set);
+                            });
+                          }}
+                          sx={{ borderRadius: 2, border: (theme) => `1px solid ${theme.palette.divider}` }}
+                        >
+                          <Checkbox checked={checked} tabIndex={-1} disableRipple />
+                          <ListItemText
+                            primary={
+                              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                                <Typography sx={{ fontWeight: 900 }}>#{o.id} • {o.reg_number}</Typography>
+                                <Typography sx={{ fontWeight: 900, whiteSpace: 'nowrap' }}>{(Number(o.total_amount_bgn) || 0).toFixed(2)} лв</Typography>
+                              </Box>
+                            }
+                            secondary={`Приключена: ${formatSqliteDateTime(completedAt)}`}
+                          />
+                        </ListItem>
+                        {idx < bulkOrdersForSelectedClient.length - 1 ? <Divider sx={{ my: 0.75 }} /> : null}
+                      </div>
+                    );
+                  })}
+                </List>
+              )}
+
+              <Box sx={{ mt: 1.25, display: 'flex', justifyContent: 'flex-end', gap: 1, flexWrap: 'wrap' }}>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  disabled={bulkSelectedOrderIds.length < 2}
+                  onClick={async () => {
+                    try {
+                      setBulkPreviewOpen(true);
+                      setBulkPreviewLoading(true);
+                      const ids = [...bulkSelectedOrderIds];
+                      const wtMap = await loadWorktimesForManyOrders(ids);
+                      setBulkWorktimesByOrderId(wtMap);
+                const missing = [];
+                ids.forEach((id) => {
+                  const rows = Array.isArray(wtMap?.[id]) ? wtMap[id] : [];
+                  rows
+                    .filter((r) => String(r?.component_type || '').trim() === 'free_ops')
+                    .forEach((r) => {
+                      const qty = Number(r?.quantity) || 0;
+                      const price = Number(r?.unit_price_bgn);
+                      if (qty > 0 && (!Number.isFinite(price) || price <= 0)) {
+                        missing.push({
+                          order_id: id,
+                          order_worktime_id: r?.id,
+                          title: r?.worktime_title || '',
+                          quantity: qty,
+                          unit_price_bgn: r?.unit_price_bgn,
+                        });
+                      }
+                    });
+                });
+                setBulkMissingFreeOps(missing);
+                    } finally {
+                      setBulkPreviewLoading(false);
+                    }
+                  }}
+                >
+                  Преглед
+                </Button>
+              </Box>
+            </Paper>
+          </Box>
+        ) : null}
+      </Paper>
+
       <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', mb: 1, gap: 1, flexWrap: 'wrap' }}>
         <Typography variant={isPhone ? 'subtitle1' : 'h6'} sx={{ fontWeight: 900 }}>
           Приключени поръчки
@@ -1835,6 +2824,43 @@ export default function Invoices({ canDeleteInvoices = false }) {
           Показани: <strong>{filteredOrders.length}</strong>
         </Typography>
       </Box>
+
+      {String(groupFocusInvoiceNo || '').trim() ? (
+        <Paper
+          variant="outlined"
+          sx={{ mb: 1.25, p: 1.25, borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap' }}
+        >
+          <Box sx={{ minWidth: 0 }}>
+            <Typography sx={{ fontWeight: 900 }}>
+              Филтър: групова фактура №{String(groupFocusInvoiceNo).trim()}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Показват се само поръчките от тази група.
+            </Typography>
+          </Box>
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ ml: 'auto' }}>
+            <Button
+              variant="contained"
+              onClick={() => openExistingGroupInvoicePrint(groupFocusInvoiceNo)}
+              disabled={groupPreviewLoading}
+            >
+              {groupPreviewLoading ? 'Зареждане...' : 'Преглед на фактурата'}
+            </Button>
+            {isAdmin ? (
+              <Button
+                variant="outlined"
+                color="error"
+                onClick={() => deleteGroupInvoiceByInvoiceNo(groupFocusInvoiceNo)}
+              >
+                Изтрий групова фактура
+              </Button>
+            ) : null}
+            <Button variant="outlined" onClick={() => setGroupFocusInvoiceNo('')}>
+              Изчисти филтъра
+            </Button>
+          </Stack>
+        </Paper>
+      ) : null}
 
       <Box
         sx={{
@@ -1849,6 +2875,9 @@ export default function Invoices({ canDeleteInvoices = false }) {
           const status = getInvoiceStatusMeta(o);
           const isInvoiced = Boolean(doc);
           const isPaid = Number(doc?.is_paid) === 1;
+          const invNo = String(doc?.invoice_no || '').trim();
+          const groupMeta = invNo ? invoiceGroupMetaByInvoiceNo.get(invNo) : null;
+          const isGroupInvoice = Boolean(groupMeta && Number(groupMeta.count) > 1);
           const completedAt = o.completed_at || o.created_at;
           const amountParts = getBgnEurParts(o.total_amount_bgn);
 
@@ -1887,6 +2916,23 @@ export default function Invoices({ canDeleteInvoices = false }) {
                           variant="outlined"
                           sx={{ fontWeight: 800 }}
                         />
+                      ) : null}
+                      {isGroupInvoice ? (
+                        <Tooltip title="Групова фактура – покажи всички поръчки от групата">
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setGroupFocusInvoiceNo(invNo);
+                            }}
+                            startIcon={<LinkIcon />}
+                            sx={{ fontWeight: 900 }}
+                          >
+                            Група
+                          </Button>
+                        </Tooltip>
                       ) : null}
                       {isInvoiced ? <CheckCircleIcon sx={{ color: 'success.main', fontSize: 18 }} /> : null}
                       {isPaid ? <PaidIcon sx={{ color: 'warning.main', fontSize: 18 }} /> : null}
@@ -2145,6 +3191,226 @@ export default function Invoices({ canDeleteInvoices = false }) {
             disabled={!selectedOrder}
           >
             Фактуриране
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bulk invoice preview */}
+      <Dialog
+        open={bulkPreviewOpen}
+        onClose={() => {
+          if (bulkGenerating) return;
+          setBulkPreviewOpen(false);
+        }}
+        maxWidth="md"
+        fullWidth
+        fullScreen={fullScreenDialog}
+      >
+        <DialogTitle sx={{ fontWeight: 900 }}>
+          Преглед – групова фактура
+        </DialogTitle>
+        <DialogContent>
+          {bulkPreviewLoading ? (
+            <Typography sx={{ fontWeight: 800 }}>Зареждане...</Typography>
+          ) : (
+            <Box sx={{ display: 'grid', gap: 1.25 }}>
+              <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 900, mb: 0.5 }}>
+                  Обобщение
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Клиент: <strong>{bulkRecipientDraft.name || '—'}</strong>
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Поръчки: <strong>{bulkPreviewLines.length}</strong>
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Данъчна основа: <strong>{bulkPreviewTotals.taxBase.toFixed(2)} лв</strong> • ДДС: <strong>{bulkPreviewTotals.vatAmount.toFixed(2)} лв</strong> • Общо: <strong>{bulkPreviewTotals.totalAmount.toFixed(2)} лв</strong>
+                </Typography>
+              </Paper>
+
+              {bulkMissingFreeOps.length ? (
+                <Paper
+                  variant="outlined"
+                  sx={{ p: 1.5, borderRadius: 2, borderColor: 'error.main', bgcolor: (theme) => theme.palette.error.main + '08' }}
+                >
+                  <Typography sx={{ fontWeight: 900, color: 'error.main' }}>
+                    Липсва цена за „Свободни Операции“
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+                    Генерирането е блокирано докато не се въведе цена за тези позиции:
+                  </Typography>
+                  <Box sx={{ display: 'grid', gap: 1, mt: 1 }}>
+                    {bulkMissingFreeOps.slice(0, 10).map((x, idx) => {
+                      const rowId = Number(x?.order_worktime_id);
+                      const orderId = Number(x?.order_id);
+                      const draft = bulkFreeOpsPriceDraftByRowId?.[rowId] ?? '';
+                      const saving = bulkFreeOpsSavingRowId === rowId;
+                      return (
+                        <Paper key={`${x.order_id}-${rowId || idx}`} variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
+                          <Typography variant="body2" sx={{ fontWeight: 900 }}>
+                            Поръчка #{orderId}: {x.title || '—'}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
+                            Количество: x{Number(x?.quantity) || 0}
+                          </Typography>
+                          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1 }}>
+                            <TextField
+                              label="Ед. цена (лв) *"
+                              size="small"
+                              type="number"
+                              value={draft}
+                              onChange={(e) =>
+                                setBulkFreeOpsPriceDraftByRowId((prev) => ({
+                                  ...(prev || {}),
+                                  [rowId]: e.target.value,
+                                }))
+                              }
+                              inputProps={{ min: 0, step: '0.01' }}
+                              sx={{ width: { xs: '100%', sm: 220 } }}
+                              disabled={!rowId || saving}
+                            />
+                            <Button
+                              variant="contained"
+                              onClick={() => saveBulkFreeOpsPrice({ orderId, orderWorktimeId: rowId })}
+                              disabled={!rowId || saving}
+                            >
+                              {saving ? 'Запис...' : 'Запази цена'}
+                            </Button>
+                          </Stack>
+                        </Paper>
+                      );
+                    })}
+                    {bulkMissingFreeOps.length > 10 ? (
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                        + още {bulkMissingFreeOps.length - 10}
+                      </Typography>
+                    ) : null}
+                  </Box>
+                </Paper>
+              ) : null}
+
+              <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 900, mb: 1 }}>
+                  Поръчки във фактурата
+                </Typography>
+                <List dense sx={{ p: 0 }}>
+                  {bulkPreviewLines.map(({ order, taxBase, vatAmount, totalAmount }, idx) => (
+                    <div key={order.id}>
+                      <ListItem sx={{ px: 0 }}>
+                        <ListItemText
+                          primary={<Typography sx={{ fontWeight: 900 }}>#{order.id} • {order.reg_number}</Typography>}
+                          secondary={
+                            <Typography variant="body2" color="text.secondary">
+                              Основа: {taxBase.toFixed(2)} лв • ДДС: {vatAmount.toFixed(2)} лв • Общо: {totalAmount.toFixed(2)} лв
+                            </Typography>
+                          }
+                        />
+                      </ListItem>
+                      {idx < bulkPreviewLines.length - 1 ? <Divider sx={{ my: 0.5 }} /> : null}
+                    </div>
+                  ))}
+                </List>
+              </Paper>
+
+              <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 900, mb: 1 }}>
+                  Получател (може да се коригира)
+                </Typography>
+                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr', gap: 1.25 }}>
+                  <TextField
+                    label="Име на фирма"
+                    value={bulkRecipientDraft.name}
+                    onChange={(e) => setBulkRecipientDraft((prev) => ({ ...prev, name: e.target.value }))}
+                    fullWidth
+                  />
+                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.25 }}>
+                    <TextField
+                      label="ЕИК"
+                      value={bulkRecipientDraft.eik}
+                      onChange={(e) => setBulkRecipientDraft((prev) => ({ ...prev, eik: e.target.value }))}
+                      fullWidth
+                    />
+                    <TextField
+                      label="ДДС №"
+                      value={bulkRecipientDraft.vat_number}
+                      onChange={(e) => setBulkRecipientDraft((prev) => ({ ...prev, vat_number: e.target.value }))}
+                      fullWidth
+                    />
+                  </Box>
+                  <TextField
+                    label="Град"
+                    value={bulkRecipientDraft.city}
+                    onChange={(e) => setBulkRecipientDraft((prev) => ({ ...prev, city: e.target.value }))}
+                    fullWidth
+                  />
+                  <TextField
+                    label="Адрес"
+                    value={bulkRecipientDraft.address}
+                    onChange={(e) => setBulkRecipientDraft((prev) => ({ ...prev, address: e.target.value }))}
+                    fullWidth
+                  />
+                  <TextField
+                    label="МОЛ"
+                    value={bulkRecipientDraft.mol}
+                    onChange={(e) => setBulkRecipientDraft((prev) => ({ ...prev, mol: e.target.value }))}
+                    fullWidth
+                  />
+                </Box>
+              </Paper>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setBulkPreviewOpen(false)}
+            disabled={bulkGenerating}
+          >
+            Затвори
+          </Button>
+          <Button
+            variant="contained"
+            color="success"
+            disabled={
+              bulkGenerating ||
+              bulkPreviewLoading ||
+              bulkPreviewLines.length < 2 ||
+              bulkMissingFreeOps.length > 0 ||
+              !String(bulkIssueDateDraft || '').trim()
+            }
+            onClick={async () => {
+              try {
+                setBulkGenerating(true);
+                const ids = bulkPreviewLines.map((x) => x.order.id);
+                const result = await reserveBulkDocumentNumbers({ orderIds: ids });
+                const docs = Array.isArray(result?.docs) ? result.docs : [];
+                const docsByOrderId = {};
+                docs.forEach((d) => {
+                  if (d?.order_id != null) docsByOrderId[d.order_id] = d;
+                });
+
+                setInvoicedDocsByOrderId((prev) => {
+                  const next = { ...(prev || {}) };
+                  docs.forEach((d) => {
+                    if (d?.order_id != null) next[d.order_id] = d;
+                  });
+                  return next;
+                });
+
+                setBulkPreviewOpen(false);
+
+                openBulkInvoicePrint({
+                  docsByOrderId,
+                  worktimesByOrderId: bulkWorktimesByOrderId,
+                });
+              } catch (e) {
+                alert(e?.response?.data?.error || 'Грешка при генериране на групова фактура');
+              } finally {
+                setBulkGenerating(false);
+              }
+            }}
+          >
+            {bulkGenerating ? 'Генериране...' : 'Генерирай групова фактура'}
           </Button>
         </DialogActions>
       </Dialog>
