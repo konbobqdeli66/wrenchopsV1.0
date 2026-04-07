@@ -1744,6 +1744,11 @@ export default function Invoices({ canDeleteInvoices = false }) {
     const toEur = (bgn) => (Number(bgn) || 0) / eurRate;
     const fmt2 = (n) => (Number(n) || 0).toFixed(2);
     const fmtBgnEur = (bgn) => `${fmt2(bgn)} BGN / ${fmt2(toEur(bgn))} EUR`;
+    const fmtBgnEurHtml = (bgn) => {
+      const b = Number(bgn) || 0;
+      const e = toEur(b);
+      return `<div>${fmt2(b)} лв</div><div class="muted" style="font-size:12px;">${fmt2(e)} EUR</div>`;
+    };
 
     const pad = (num, len) => String(num ?? '').padStart(len, '0');
 
@@ -1796,9 +1801,9 @@ export default function Invoices({ canDeleteInvoices = false }) {
         <td>${escapeHtml(serviceDescription)}</td>
         <td>${escapeHtml(selectedOrder.reg_number || '')}</td>
         <td style="text-align:right">1</td>
-        <td style="text-align:right">${taxBase.toFixed(2)}</td>
+        <td style="text-align:right">${fmtBgnEurHtml(taxBase)}</td>
         <td style="text-align:right">${vatRate.toFixed(2)}%</td>
-        <td style="text-align:right">${taxBase.toFixed(2)}</td>
+        <td style="text-align:right">${fmtBgnEurHtml(taxBase)}</td>
       </tr>
     `;
 
