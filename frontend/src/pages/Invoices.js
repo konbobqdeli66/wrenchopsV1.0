@@ -145,6 +145,9 @@ export default function Invoices({ canDeleteInvoices = false }) {
   const [invoiceConfirmOpen, setInvoiceConfirmOpen] = useState(false);
   const [reservingDocs, setReservingDocs] = useState(false);
 
+  // Date printed on invoice/protocol (YYYY-MM-DD). Can be edited before invoicing.
+  const [invoiceIssueDateDraft, setInvoiceIssueDateDraft] = useState('');
+
   // Multipliers (selected before invoicing)
   const [multOutOfHoursChecked, setMultOutOfHoursChecked] = useState(false);
   const [multHolidayChecked, setMultHolidayChecked] = useState(false);
@@ -585,9 +588,15 @@ export default function Invoices({ canDeleteInvoices = false }) {
     invoiceEmailInputRef.current = '';
     setOrderDialogOpen(true);
 
+    // Default invoice issue date to the service date (completed_at || created_at) to preserve old behavior.
+    // If already invoiced, show the stored issue_date (read-only in UI).
+    const existingDoc = invoicedDocsByOrderId?.[order?.id];
+    const serviceDate = String(order?.completed_at || order?.created_at || '').slice(0, 10);
+    const storedIssueDate = String(existingDoc?.issue_date || '').slice(0, 10);
+    setInvoiceIssueDateDraft(storedIssueDate || serviceDate || new Date().toISOString().slice(0, 10));
+
     // If the order is already invoiced, keep the previously applied multipliers (locked).
     // Otherwise default to unchecked.
-    const existingDoc = invoicedDocsByOrderId?.[order?.id];
     setMultOutOfHoursChecked(Number(existingDoc?.mult_out_of_hours) > 1);
     setMultHolidayChecked(Number(existingDoc?.mult_holiday) > 1);
     setMultOutOfServiceChecked(Number(existingDoc?.mult_out_of_service) > 1);
@@ -685,10 +694,20 @@ export default function Invoices({ canDeleteInvoices = false }) {
   // Used in invoice/protocol document print: issue dates must NOT include time.
   const formatSqliteDateOnly = (dt) => {
     if (!dt) return '—';
+
+    const s = String(dt);
+    // Support both:
+    // - SQLite datetime('now') => 'YYYY-MM-DD HH:MM:SS'
+    // - Date-only => 'YYYY-MM-DD'
+    const dateOnlyMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateOnlyMatch) {
+      return `${dateOnlyMatch[3]}.${dateOnlyMatch[2]}.${dateOnlyMatch[1]}`;
+    }
+
     // SQLite datetime('now') returns 'YYYY-MM-DD HH:MM:SS'
-    const safe = String(dt).replace(' ', 'T');
+    const safe = s.replace(' ', 'T');
     const d = new Date(safe);
-    return Number.isNaN(d.getTime()) ? String(dt).slice(0, 10) : d.toLocaleDateString('bg-BG');
+    return Number.isNaN(d.getTime()) ? s.slice(0, 10) : d.toLocaleDateString('bg-BG');
   };
 
   const formatBgnEur = (bgnAmount) => {
@@ -812,6 +831,7 @@ export default function Invoices({ canDeleteInvoices = false }) {
   const reserveDocumentNumbers = async () => {
     if (!selectedOrder) throw new Error('No order selected');
     const res = await axios.post(`${getApiBaseUrl()}/orders/${selectedOrder.id}/documents/reserve`, {
+      issue_date: String(invoiceIssueDateDraft || '').trim() || undefined,
       multipliers: {
         out_of_hours: multOutOfHoursChecked,
         holiday: multHolidayChecked,
@@ -961,6 +981,7 @@ export default function Invoices({ canDeleteInvoices = false }) {
     const protocolNo = docNumbers?.protocol_no || pad(workcardNo, 10);
     const invoiceNo = docNumbers?.invoice_no || `09${pad(workcardNo, 8)}`;
     const completedAt = selectedOrder.completed_at || selectedOrder.created_at;
+    const issueDate = docNumbers?.issue_date || completedAt;
 
     const logoDataUrl = company.logo_data_url || '';
     const logoHtml = logoDataUrl
@@ -1068,8 +1089,8 @@ export default function Invoices({ canDeleteInvoices = false }) {
 
           <div style="display:flex; justify-content: space-between; gap: 18mm; margin-top: 10mm;">
             <div style="flex:1;" class="summary">
-              <div class="line"><span class="k">Дата на издаване:</span><span class="v">${escapeHtml(formatSqliteDateOnly(completedAt))}</span></div>
-              <div class="line"><span class="k">Дата на дан. събитие:</span><span class="v">${escapeHtml(formatSqliteDateOnly(completedAt))}</span></div>
+              <div class="line"><span class="k">Дата на издаване:</span><span class="v">${escapeHtml(formatSqliteDateOnly(issueDate))}</span></div>
+              <div class="line"><span class="k">Дата на дан. събитие:</span><span class="v">${escapeHtml(formatSqliteDateOnly(issueDate))}</span></div>
               <div class="line"><span class="k">Място на сделката:</span><span class="v">${escapeHtml(company.city || '')}</span></div>
               <div class="line"><span class="k">Рег. №:</span><span class="v">${escapeHtml(selectedOrder.reg_number)}</span></div>
             </div>
@@ -1164,9 +1185,9 @@ export default function Invoices({ canDeleteInvoices = false }) {
             <div class="meta"><span class="badge">${escapeHtml(watermarkLabel)}</span></div>
           </div>
 
-          <div style="border-top: 2px solid #111; border-bottom: 2px solid #111; padding: 6px 0; margin-top: 4mm; display:flex; gap: 10mm; font-size: 12.5px;">
-            <div><span class="k">Дата на издаване:</span> <strong>${escapeHtml(formatSqliteDateOnly(completedAt))}</strong></div>
-            <div><span class="k">Дата на дан. събитие:</span> <strong>${escapeHtml(formatSqliteDateOnly(completedAt))}</strong></div>
+            <div style="border-top: 2px solid #111; border-bottom: 2px solid #111; padding: 6px 0; margin-top: 4mm; display:flex; gap: 10mm; font-size: 12.5px;">
+            <div><span class="k">Дата на издаване:</span> <strong>${escapeHtml(formatSqliteDateOnly(issueDate))}</strong></div>
+            <div><span class="k">Дата на дан. събитие:</span> <strong>${escapeHtml(formatSqliteDateOnly(issueDate))}</strong></div>
             <div style="margin-left:auto;"><span class="k">Място на сделката:</span> <strong>${escapeHtml(company.city || '')}</strong></div>
           </div>
 
@@ -2187,6 +2208,19 @@ export default function Invoices({ canDeleteInvoices = false }) {
               <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1 }}>
                 Обобщение
               </Typography>
+
+              <TextField
+                label="Дата на фактуриране"
+                type="date"
+                value={invoiceIssueDateDraft}
+                onChange={(e) => setInvoiceIssueDateDraft(e.target.value)}
+                fullWidth
+                sx={{ mb: 1.25 }}
+                InputLabelProps={{ shrink: true }}
+                helperText={isSelectedOrderAlreadyInvoiced ? 'Поръчката вече е фактурирана – датата не може да се променя.' : 'Дата, която ще се отпечата във фактурата/протокола.'}
+                disabled={reservingDocs || isSelectedOrderAlreadyInvoiced}
+              />
+
               <TextField
                 select
                 label="Тип (за текста във фактурата)"
@@ -2352,7 +2386,8 @@ export default function Invoices({ canDeleteInvoices = false }) {
               reservingDocs ||
               (!selectedVehicleType && !vehicleTypeOverride) ||
               (sendInvoiceByEmail && !String(invoiceEmailInputRef.current || invoiceEmailTo || '').trim()) ||
-              missingFreeOps.length > 0
+              missingFreeOps.length > 0 ||
+              !String(invoiceIssueDateDraft || '').trim()
             }
           >
             {reservingDocs ? 'Генериране...' : 'Потвърди'}

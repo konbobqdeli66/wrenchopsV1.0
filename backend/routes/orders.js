@@ -41,6 +41,8 @@ const padLeft = (num, len) => String(num ?? '').padStart(len, '0');
 
 const FREE_OPS_COMPONENT_TYPE = 'free_ops';
 
+const isValidDateOnly = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || '').trim());
+
 const isAdminUser = (req) => String(req.user?.role || '').trim() === 'admin';
 
 // Completed orders are used as immutable service history (and for invoicing).
@@ -435,6 +437,7 @@ router.put('/:id/complete', checkPermission('orders', 'write'), (req, res) => {
 router.post('/:id/documents/reserve', checkPermission('orders', 'write'), (req, res) => {
     const orderId = req.params.id;
     const multFlags = req.body?.multipliers || {};
+    const requestedIssueDateRaw = String(req.body?.issue_date || '').trim();
 
     db.get('SELECT * FROM order_documents WHERE order_id = ?', [orderId], (err, existing) => {
         if (err) {
@@ -471,6 +474,13 @@ router.post('/:id/documents/reserve', checkPermission('orders', 'write'), (req, 
                         return res.status(500).json({ error: err.message });
                     }
 
+                    // Validate requested issue_date (YYYY-MM-DD) if provided.
+                    // If missing, we will default it to the service date (completed_at || created_at).
+                    if (requestedIssueDateRaw && !isValidDateOnly(requestedIssueDateRaw)) {
+                        db.run('ROLLBACK');
+                        return res.status(400).json({ error: 'Невалиден формат за дата на фактуриране (използвайте YYYY-MM-DD).' });
+                    }
+
                     // Enforce pricing for any "free_ops" items before invoicing.
                     // IMPORTANT: This must block invoicing if unit_price_bgn is missing/zero.
                     db.all(
@@ -505,6 +515,23 @@ router.post('/:id/documents/reserve', checkPermission('orders', 'write'), (req, 
                                 });
                             }
 
+
+                    // Resolve issue_date fallback (service date).
+                    const resolveIssueDate = (cb) => {
+                        if (requestedIssueDateRaw) return cb(null, requestedIssueDateRaw);
+                        db.get(
+                            'SELECT COALESCE(completed_at, created_at) as service_dt FROM orders WHERE id = ?',
+                            [orderId],
+                            (dtErr, row) => {
+                                if (dtErr) return cb(dtErr);
+                                const d = String(row?.service_dt || '').slice(0, 10);
+                                // If service_dt is missing/malformed, fall back to today.
+                                const fallback = new Date().toISOString().slice(0, 10);
+                                return cb(null, isValidDateOnly(d) ? d : fallback);
+                            }
+                        );
+                    };
+
                     const invoicePrefix = settings?.invoice_prefix ?? '09';
                     const invoicePadLength = Math.max(1, parseInt(settings?.invoice_pad_length, 10) || 8);
                     const lastInvoice = parseInt(settings?.invoice_last_number, 10) || 0;
@@ -526,57 +553,66 @@ router.post('/:id/documents/reserve', checkPermission('orders', 'write'), (req, 
                     const protocolNo = padLeft(nextProtocol, protocolPadLength);
                     const invoiceNo = `${invoicePrefix}${padLeft(nextInvoice, invoicePadLength)}`;
 
-                    db.run(
-                        'UPDATE company_settings SET invoice_last_number = ?, protocol_last_number = ? WHERE id = 1',
-                        [nextInvoice, nextProtocol],
-                        (err) => {
-                            if (err) {
-                                db.run('ROLLBACK');
-                                return res.status(500).json({ error: err.message });
-                            }
-
-                            db.run(
-                                `
-                                  INSERT INTO order_documents (
-                                    order_id,
-                                    protocol_no,
-                                    invoice_no,
-                                    mult_out_of_hours,
-                                    mult_holiday,
-                                    mult_out_of_service
-                                  )
-                                  VALUES (?, ?, ?, ?, ?, ?)
-                                `,
-                                [
-                                  orderId,
-                                  protocolNo,
-                                  invoiceNo,
-                                  mult_out_of_hours,
-                                  mult_holiday,
-                                  mult_out_of_service,
-                                ],
-                                function(err) {
-                                    if (err) {
-                                        db.run('ROLLBACK');
-                                        return res.status(500).json({ error: err.message });
-                                    }
-
-                                    db.get(
-                                        'SELECT * FROM order_documents WHERE order_id = ?',
-                                        [orderId],
-                                        (err, row) => {
-                                            if (err) {
-                                                db.run('ROLLBACK');
-                                                return res.status(500).json({ error: err.message });
-                                            }
-                                            db.run('COMMIT');
-                                            return res.json(row);
-                                        }
-                                    );
-                                }
-                            );
+                    resolveIssueDate((issueErr, issueDate) => {
+                        if (issueErr) {
+                            db.run('ROLLBACK');
+                            return res.status(500).json({ error: issueErr.message });
                         }
-                    );
+
+                        db.run(
+                            'UPDATE company_settings SET invoice_last_number = ?, protocol_last_number = ? WHERE id = 1',
+                            [nextInvoice, nextProtocol],
+                            (err) => {
+                                if (err) {
+                                    db.run('ROLLBACK');
+                                    return res.status(500).json({ error: err.message });
+                                }
+
+                                db.run(
+                                    `
+                                      INSERT INTO order_documents (
+                                        order_id,
+                                        protocol_no,
+                                        invoice_no,
+                                        issue_date,
+                                        mult_out_of_hours,
+                                        mult_holiday,
+                                        mult_out_of_service
+                                      )
+                                      VALUES (?, ?, ?, ?, ?, ?, ?)
+                                    `,
+                                    [
+                                      orderId,
+                                      protocolNo,
+                                      invoiceNo,
+                                      issueDate,
+                                      mult_out_of_hours,
+                                      mult_holiday,
+                                      mult_out_of_service,
+                                    ],
+                                    function(err) {
+                                        if (err) {
+                                            db.run('ROLLBACK');
+                                            return res.status(500).json({ error: err.message });
+                                        }
+
+                                        db.get(
+                                            'SELECT * FROM order_documents WHERE order_id = ?',
+                                            [orderId],
+                                            (err, row) => {
+                                                if (err) {
+                                                    db.run('ROLLBACK');
+                                                    return res.status(500).json({ error: err.message });
+                                                }
+                                                db.run('COMMIT');
+                                                return res.json(row);
+                                            }
+                                        );
+                                    }
+                                );
+                            }
+                        );
+                    });
                         }
                     );
                 }
@@ -672,9 +708,11 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
                 .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
                 .replace(/\s+/g, ' ');
 
-        const toBgDate = (sqliteDt) => {
-            // 'YYYY-MM-DD HH:MM:SS' -> 'DD.MM.YYYY'
-            const d = String(sqliteDt || '').slice(0, 10);
+        const toBgDate = (sqliteDtOrDateOnly) => {
+            // Accept either:
+            // - 'YYYY-MM-DD HH:MM:SS' (SQLite)
+            // - 'YYYY-MM-DD' (date-only)
+            const d = String(sqliteDtOrDateOnly || '').slice(0, 10);
             const m = d.match(/^(\d{4})-(\d{2})-(\d{2})$/);
             if (!m) return '—';
             return `${m[3]}.${m[2]}.${m[1]}`;
@@ -687,7 +725,7 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
         );
         const assetLabel = vehicleRow?.vehicle_type === 'trailer' ? 'ремарке' : 'влекач';
         const docs = await dbGet(
-            'SELECT protocol_no, invoice_no, mult_out_of_hours, mult_holiday, mult_out_of_service FROM order_documents WHERE order_id = ?',
+            'SELECT protocol_no, invoice_no, issue_date, mult_out_of_hours, mult_holiday, mult_out_of_service FROM order_documents WHERE order_id = ?',
             [orderId]
         );
         const company =
@@ -791,7 +829,7 @@ router.put('/:id/documents/paid', checkPermission('orders', 'write'), (req, res)
             mol: recipient?.mol || '',
         };
 
-        const issueDateSql = order?.completed_at || order?.created_at || '';
+        const issueDateSql = docs?.issue_date || order?.completed_at || order?.created_at || '';
         const issueDateBg = toBgDate(issueDateSql);
 
         const regNumber = safeFilePart(order?.reg_number || `order-${orderId}`);

@@ -396,6 +396,8 @@ const ensureCompanySettingsSQL = `
     order_id INTEGER PRIMARY KEY,
     protocol_no TEXT,
     invoice_no TEXT,
+    -- Date printed on invoice/protocol (YYYY-MM-DD). User can override before invoicing.
+    issue_date TEXT,
     -- Multipliers applied to the base amount at the moment of invoicing
     mult_out_of_hours REAL DEFAULT 1,
     mult_holiday REAL DEFAULT 1,
@@ -482,6 +484,18 @@ const ensureCompanySettings = (callback) => {
       await runAsync('UPDATE order_documents SET mult_out_of_hours = COALESCE(mult_out_of_hours, 1)');
       await runAsync('UPDATE order_documents SET mult_holiday = COALESCE(mult_holiday, 1)');
       await runAsync('UPDATE order_documents SET mult_out_of_service = COALESCE(mult_out_of_service, 1)');
+
+      // 3c) order_documents issue_date (date printed on invoice/protocol)
+      await runAsync('ALTER TABLE order_documents ADD COLUMN issue_date TEXT');
+      // Backfill from service date (completed_at/created_at) to preserve old printing behavior.
+      await runAsync(
+        `UPDATE order_documents
+         SET issue_date = COALESCE(
+           issue_date,
+           substr((SELECT COALESCE(o.completed_at, o.created_at) FROM orders o WHERE o.id = order_documents.order_id), 1, 10),
+           substr(created_at, 1, 10)
+         )`
+      );
     } catch (err) {
       console.warn('Could not ensure company_settings table:', err?.message || String(err));
     } finally {
